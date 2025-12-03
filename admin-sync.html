@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TEST Bot - Admin Sync</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #1a1a2e;
+      color: white;
+      min-height: 100vh;
+      padding: 40px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 10px;
+      color: #667eea;
+    }
+
+    p.subtitle {
+      color: #888;
+      margin-bottom: 30px;
+    }
+
+    .card {
+      background: #16213e;
+      border-radius: 15px;
+      padding: 25px;
+      margin-bottom: 20px;
+    }
+
+    .card h2 {
+      font-size: 1.2rem;
+      margin-bottom: 15px;
+      color: #667eea;
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 5px;
+      color: #aaa;
+      font-size: 0.9rem;
+    }
+
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      padding: 12px 15px;
+      border: 1px solid #333;
+      border-radius: 8px;
+      background: #0f0f23;
+      color: white;
+      font-size: 1rem;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 12px 25px;
+      border-radius: 8px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .status {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 8px;
+      display: none;
+    }
+
+    .status.success {
+      background: rgba(34, 197, 94, 0.2);
+      border: 1px solid #22c55e;
+      display: block;
+    }
+
+    .status.error {
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid #ef4444;
+      display: block;
+    }
+
+    .status.loading {
+      background: rgba(102, 126, 234, 0.2);
+      border: 1px solid #667eea;
+      display: block;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 15px;
+      margin-top: 20px;
+    }
+
+    .stat-box {
+      background: #0f0f23;
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+    }
+
+    .stat-box .number {
+      font-size: 2rem;
+      font-weight: bold;
+      color: #667eea;
+    }
+
+    .stat-box .label {
+      font-size: 0.85rem;
+      color: #888;
+      margin-top: 5px;
+    }
+
+    .product-list {
+      max-height: 400px;
+      overflow-y: auto;
+      margin-top: 15px;
+    }
+
+    .product-item {
+      background: #0f0f23;
+      padding: 12px 15px;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .product-item .name {
+      flex: 1;
+    }
+
+    .product-item .price {
+      color: #22c55e;
+      font-weight: bold;
+    }
+
+    .product-item .stock {
+      font-size: 0.85rem;
+      margin-left: 15px;
+    }
+
+    .stock.available {
+      color: #22c55e;
+    }
+
+    .stock.unavailable {
+      color: #ef4444;
+    }
+
+    pre {
+      background: #0f0f23;
+      padding: 15px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔄 TEST Bot - Sync Admin</h1>
+    <p class="subtitle">Synchronizácia produktov zo Shopify</p>
+
+    <div class="card">
+      <h2>Synchronizovať produkty</h2>
+      <div class="form-group">
+        <label>Sync Secret Token</label>
+        <input type="password" id="secretToken" placeholder="Zadajte SYNC_SECRET">
+      </div>
+      <button onclick="syncProducts()" id="syncBtn">🔄 Spustiť synchronizáciu</button>
+      
+      <div id="syncStatus" class="status"></div>
+    </div>
+
+    <div class="card">
+      <h2>Aktuálne uložené produkty</h2>
+      <button onclick="loadCachedProducts()">📦 Načítať z cache</button>
+      
+      <div id="cacheStatus" class="status"></div>
+      
+      <div class="stats" id="stats" style="display: none;">
+        <div class="stat-box">
+          <div class="number" id="totalProducts">0</div>
+          <div class="label">Produktov</div>
+        </div>
+        <div class="stat-box">
+          <div class="number" id="availableProducts">0</div>
+          <div class="label">Skladom</div>
+        </div>
+        <div class="stat-box">
+          <div class="number" id="totalCollections">0</div>
+          <div class="label">Kolekcií</div>
+        </div>
+        <div class="stat-box">
+          <div class="number" id="lastSync">-</div>
+          <div class="label">Posledná sync</div>
+        </div>
+      </div>
+
+      <div class="product-list" id="productList"></div>
+    </div>
+
+    <div class="card">
+      <h2>ℹ️ Návod</h2>
+      <p style="color: #aaa; line-height: 1.6;">
+        1. Nastavte <code>SYNC_SECRET</code> v Vercel Environment Variables<br>
+        2. Zadajte rovnaký secret token hore<br>
+        3. Kliknite na "Spustiť synchronizáciu"<br>
+        4. Produkty sa uložia a chatbot ich bude používať<br><br>
+        <strong>Tip:</strong> Pre automatickú synchronizáciu nastavte Vercel Cron Job:<br>
+        <pre>vercel.json:
+{
+  "crons": [{
+    "path": "/api/syncProducts",
+    "schedule": "0 6 * * *"
+  }]
+}</pre>
+      </p>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin;
+
+    async function syncProducts() {
+      const secret = document.getElementById('secretToken').value;
+      const btn = document.getElementById('syncBtn');
+      const status = document.getElementById('syncStatus');
+
+      if (!secret) {
+        status.className = 'status error';
+        status.textContent = '❌ Zadajte secret token';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = '⏳ Synchronizujem...';
+      status.className = 'status loading';
+      status.textContent = '🔄 Načítavam produkty zo Shopify...';
+
+      try {
+        const response = await fetch(`${API_BASE}/api/syncProducts`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${secret}`
+          },
+          body: JSON.stringify({ secret })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+          status.className = 'status success';
+          status.innerHTML = `✅ <strong>Synchronizácia úspešná!</strong><br>
+            Produktov: ${data.totalProducts}<br>
+            Kolekcií: ${data.totalCollections}<br>
+            Zliav: ${data.totalDiscounts}<br>
+            Čas: ${new Date(data.syncedAt).toLocaleString('sk-SK')}`;
+          
+          // Automaticky načítaj produkty
+          loadCachedProducts();
+        } else {
+          status.className = 'status error';
+          status.textContent = `❌ Chyba: ${data.error || data.message || 'Neznáma chyba'}`;
+        }
+      } catch (error) {
+        status.className = 'status error';
+        status.textContent = `❌ Chyba pripojenia: ${error.message}`;
+      }
+
+      btn.disabled = false;
+      btn.textContent = '🔄 Spustiť synchronizáciu';
+    }
+
+    async function loadCachedProducts() {
+      const status = document.getElementById('cacheStatus');
+      const stats = document.getElementById('stats');
+      const productList = document.getElementById('productList');
+
+      status.className = 'status loading';
+      status.textContent = '📦 Načítavam...';
+
+      try {
+        const response = await fetch(`${API_BASE}/api/syncProducts`);
+        const data = await response.json();
+
+        if (data.success && data.data?.products?.length > 0) {
+          const products = data.data.products;
+          const available = products.filter(p => p.available).length;
+
+          // Aktualizuj štatistiky
+          document.getElementById('totalProducts').textContent = products.length;
+          document.getElementById('availableProducts').textContent = available;
+          document.getElementById('totalCollections').textContent = data.data.collections?.length || 0;
+          document.getElementById('lastSync').textContent = data.data.lastSync 
+            ? new Date(data.data.lastSync).toLocaleString('sk-SK', { 
+                day: '2-digit', 
+                month: '2-digit', 
+                hour: '2-digit', 
+                minute: '2-digit' 
+              })
+            : '-';
+
+          stats.style.display = 'grid';
+
+          // Zobraz produkty
+          productList.innerHTML = products.map(p => `
+            <div class="product-item">
+              <span class="name">${p.title}</span>
+              <span class="price">€${p.price.toFixed(2)}</span>
+              <span class="stock ${p.available ? 'available' : 'unavailable'}">
+                ${p.available ? `✅ ${p.total_inventory} ks` : '❌'}
+              </span>
+            </div>
+          `).join('');
+
+          status.className = 'status success';
+          status.textContent = `✅ Načítané ${products.length} produktov (zdroj: ${data.source || 'cache'})`;
+        } else {
+          status.className = 'status error';
+          status.textContent = data.message || '❌ Žiadne produkty v cache. Spustite synchronizáciu.';
+          stats.style.display = 'none';
+          productList.innerHTML = '';
+        }
+      } catch (error) {
+        status.className = 'status error';
+        status.textContent = `❌ Chyba: ${error.message}`;
+      }
+    }
+
+    // Načítaj produkty pri načítaní stránky
+    loadCachedProducts();
+  </script>
+</body>
+</html>

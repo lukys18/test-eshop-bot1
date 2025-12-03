@@ -1,7 +1,5 @@
 export default async function handler(req, res) {
   const API_KEY = process.env.API_KEY;
-  const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
-  const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -12,39 +10,35 @@ export default async function handler(req, res) {
     useRAG = false, 
     ragContext = '', 
     sources = [],
-    productContext = '',
     isProductQuery = false
   } = req.body;
 
   try {
     let enhancedMessages = [...messages];
-    let shopifyProductContext = productContext;
+    let productContext = '';
     
-    // Ak je to produktový dotaz a máme Shopify credentials, načítaj produkty
-    if (isProductQuery && SHOPIFY_STORE_URL && SHOPIFY_ACCESS_TOKEN && !productContext) {
+    // Ak je to produktový dotaz, načítaj produkty z cache
+    if (isProductQuery) {
       try {
-        shopifyProductContext = await fetchShopifyContext(
-          SHOPIFY_STORE_URL, 
-          SHOPIFY_ACCESS_TOKEN, 
-          getLastUserMessage(messages)
-        );
-        console.log('Shopify context fetched successfully');
-      } catch (shopifyError) {
-        console.warn('Could not fetch Shopify data:', shopifyError.message);
+        const lastUserMessage = getLastUserMessage(messages);
+        productContext = await getProductContextFromCache(lastUserMessage, req.headers.host);
+        console.log('📦 Product context loaded from cache');
+      } catch (productError) {
+        console.warn('Could not fetch product data:', productError.message);
       }
     }
     
     // Kombinuj RAG kontext s produktovým kontextom
     let combinedContext = '';
-    if (shopifyProductContext) {
-      combinedContext += `PRODUKTY ZO SHOPIFY:\n${shopifyProductContext}\n\n`;
+    if (productContext) {
+      combinedContext += productContext;
     }
     if (ragContext) {
-      combinedContext += `INFORMÁCIE Z DATABÁZY:\n${ragContext}`;
+      combinedContext += `\n\nĎALŠIE INFORMÁCIE:\n${ragContext}`;
     }
     
-    // Ak je povolený RAG alebo máme produktový kontext, vlož ho
-    if ((useRAG && ragContext) || shopifyProductContext) {
+    // Vlož kontext pred poslednú user správu
+    if (combinedContext) {
       let lastUserIndex = -1;
       for (let i = enhancedMessages.length - 1; i >= 0; i--) {
         if (enhancedMessages[i] && enhancedMessages[i].role === 'user') {
@@ -53,16 +47,15 @@ export default async function handler(req, res) {
         }
       }
 
-      if (lastUserIndex !== -1 && combinedContext) {
+      if (lastUserIndex !== -1) {
         enhancedMessages.splice(lastUserIndex, 0, {
           role: 'system',
-          content: `Relevantný kontext:\n${combinedContext}\n\nPoužite tento kontext na zodpovedanie nadchádzajúcej otázky používateľa. Pri produktoch vždy uveď cenu, dostupnosť a prípadné zľavy.`
+          content: `DÔLEŽITÉ - Použi PRESNE tieto informácie o produktoch:\n\n${combinedContext}\n\nPRAVIDLÁ:\n- Uvádzaj IBA ceny z tohto kontextu\n- Pri každom produkte uveď presnú cenu a dostupnosť\n- Ak produkt nie je v zozname, povedz že ho nemáme\n- Nedomýšľaj si ceny ani produkty`
         });
-        console.log(`Kontext vložený pred správu na indexe ${lastUserIndex}. Zdroje:`, sources);
       }
     }
 
-    console.log(`Posielam ${enhancedMessages.length} správ do API (vrátane ${useRAG ? 'RAG kontextu' : 'bez RAG'}${shopifyProductContext ? ' + Shopify dáta' : ''})`);
+    console.log(`Posielam ${enhancedMessages.length} správ do API (produktový kontext: ${productContext ? 'áno' : 'nie'})`);
 
     const response = await fetch("https://api.deepseek.com/chat/completions", {
       method: "POST",
@@ -73,7 +66,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: "deepseek-chat",
         messages: enhancedMessages,
-        temperature: 0.4,
+        temperature: 0.3, // Znížené pre presnejšie odpovede
         max_tokens: 800,
         stream: false
       })
@@ -106,109 +99,110 @@ function getLastUserMessage(messages) {
   return '';
 }
 
-// Funkcia pre načítanie Shopify kontextu
-async function fetchShopifyContext(storeUrl, accessToken, query) {
+// Načítanie produktového kontextu z cache
+async function getProductContextFromCache(query, host) {
   try {
-    // Načítaj produkty zo Shopify
-    const response = await fetch(`https://${storeUrl}/admin/api/2024-01/products.json?limit=100&status=active`, {
+    // Načítaj produkty z cache endpointu
+    const protocol = host?.includes('localhost') ? 'http' : 'https';
+    const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : `${protocol}://${host}`;
+    
+    const response = await fetch(`${baseUrl}/api/syncProducts`, {
       method: 'GET',
-      headers: {
-        'X-Shopify-Access-Token': accessToken,
-        'Content-Type': 'application/json'
-      }
+      headers: { 'Content-Type': 'application/json' }
     });
 
     if (!response.ok) {
-      throw new Error(`Shopify API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const products = data.products || [];
-
-    if (products.length === 0) {
+      console.warn('Could not fetch cached products');
       return '';
     }
 
-    // Jednoduchý search v produktoch
-    const normalizedQuery = query.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const result = await response.json();
     
-    // Filtrovanie produktov podľa dotazu
-    let relevantProducts = products.filter(product => {
-      const title = (product.title || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      const description = (product.body_html || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      const tags = (product.tags || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      const productType = (product.product_type || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      
-      // Rozdelíme dotaz na slová a hľadáme zhody
-      const queryWords = normalizedQuery.split(/\s+/).filter(w => w.length > 2);
-      
-      return queryWords.some(word => 
-        title.includes(word) || 
-        description.includes(word) || 
-        tags.includes(word) ||
-        productType.includes(word)
-      );
-    });
-
-    // Ak nemáme relevantné produkty, vrátime top 10
-    if (relevantProducts.length === 0) {
-      relevantProducts = products.slice(0, 10);
-    } else {
-      relevantProducts = relevantProducts.slice(0, 10);
+    if (!result.success || !result.data?.products?.length) {
+      console.warn('No cached products available');
+      return '';
     }
 
-    // Formátuj produkty pre kontext
-    return formatProductsForAI(relevantProducts);
+    const products = result.data.products;
+    const normalizedQuery = normalizeText(query);
+    const queryWords = normalizedQuery.split(/\s+/).filter(w => w.length > 2);
+
+    // Vyhľadaj relevantné produkty
+    let relevantProducts = products.filter(product => {
+      const searchText = normalizeText(
+        `${product.title} ${product.description} ${product.product_type} ${product.vendor} ${(product.tags || []).join(' ')}`
+      );
+      
+      return queryWords.some(word => searchText.includes(word));
+    });
+
+    // Ak máme menej ako 3 výsledky, pridaj najpredávanejšie/dostupné
+    if (relevantProducts.length < 3) {
+      const availableProducts = products
+        .filter(p => p.available && !relevantProducts.includes(p))
+        .slice(0, 5 - relevantProducts.length);
+      relevantProducts = [...relevantProducts, ...availableProducts];
+    }
+
+    // Maximálne 10 produktov pre kontext
+    relevantProducts = relevantProducts.slice(0, 10);
+
+    if (relevantProducts.length === 0) {
+      return `PRODUKTY V E-SHOPE:\nMomentálne nemáme produkty zodpovedajúce vášmu hľadaniu. Celkovo máme ${products.length} produktov.`;
+    }
+
+    // Formátuj produkty pre AI
+    const formattedProducts = relevantProducts.map((product, index) => {
+      let info = `${index + 1}. **${product.title}**`;
+      info += `\n   CENA: €${product.price.toFixed(2)}`;
+      
+      if (product.has_discount && product.compare_at_price > 0) {
+        info += ` (pôvodne €${product.compare_at_price.toFixed(2)}, zľava ${product.discount_percentage}%)`;
+      }
+      
+      info += `\n   DOSTUPNOSŤ: ${product.available ? '✅ SKLADOM' : '❌ VYPREDANÉ'}`;
+      
+      if (product.total_inventory > 0) {
+        info += ` (${product.total_inventory} ks)`;
+      }
+      
+      if (product.product_type) {
+        info += `\n   Kategória: ${product.product_type}`;
+      }
+      
+      if (product.variants && product.variants.length > 1) {
+        const variantOptions = product.variants
+          .filter(v => v.available && v.title)
+          .map(v => v.title)
+          .slice(0, 5);
+        if (variantOptions.length > 0) {
+          info += `\n   Varianty: ${variantOptions.join(', ')}`;
+        }
+      }
+
+      if (product.description && product.description.length > 0) {
+        const shortDesc = product.description.substring(0, 100);
+        info += `\n   Popis: ${shortDesc}${product.description.length > 100 ? '...' : ''}`;
+      }
+
+      return info;
+    }).join('\n\n');
+
+    return `PRODUKTY V E-SHOPE (celkovo ${products.length} produktov, posledná aktualizácia: ${result.data.lastSync || 'neznáma'}):\n\n${formattedProducts}`;
+
   } catch (error) {
-    console.error('Shopify fetch error:', error);
+    console.error('Error getting product context:', error);
     return '';
   }
 }
 
-// Formátovanie produktov pre AI kontext
-function formatProductsForAI(products) {
-  return products.map((product, index) => {
-    const mainVariant = product.variants?.[0] || {};
-    const price = parseFloat(mainVariant.price || 0);
-    const compareAtPrice = parseFloat(mainVariant.compare_at_price || 0);
-    const hasDiscount = compareAtPrice > price;
-    const available = product.variants?.some(v => v.available !== false && (v.inventory_quantity > 0 || v.inventory_policy === 'continue')) || false;
-    const totalInventory = product.variants?.reduce((sum, v) => sum + (v.inventory_quantity || 0), 0) || 0;
-
-    let info = `${index + 1}. **${product.title}**`;
-    
-    if (hasDiscount) {
-      const discountPercent = Math.round((1 - price / compareAtPrice) * 100);
-      info += `\n   Cena: ~~€${compareAtPrice}~~ **€${price}** (-${discountPercent}% ZĽAVA!)`;
-    } else {
-      info += `\n   Cena: €${price}`;
-    }
-    
-    info += `\n   Dostupnosť: ${available ? `✅ Skladom (${totalInventory} ks)` : '❌ Vypredané'}`;
-    
-    if (product.product_type) {
-      info += `\n   Kategória: ${product.product_type}`;
-    }
-    
-    if (product.vendor) {
-      info += `\n   Značka: ${product.vendor}`;
-    }
-
-    // Varianty
-    if (product.variants && product.variants.length > 1) {
-      const availableVariants = product.variants.filter(v => v.inventory_quantity > 0 || v.inventory_policy === 'continue');
-      if (availableVariants.length > 0) {
-        info += `\n   Dostupné varianty: ${availableVariants.map(v => v.title).join(', ')}`;
-      }
-    }
-
-    // Skrátený popis
-    if (product.body_html) {
-      const cleanDesc = product.body_html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-      const shortDesc = cleanDesc.substring(0, 100);
-      info += `\n   Popis: ${shortDesc}${cleanDesc.length > 100 ? '...' : ''}`;
-    }
-
-    return info;
-  }).join('\n\n');
+// Normalizácia textu pre vyhľadávanie
+function normalizeText(text) {
+  return (text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
