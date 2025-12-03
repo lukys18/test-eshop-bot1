@@ -287,6 +287,3 @@ function stripHtml(html) {
     .replace(/\s+/g, ' ')
     .trim();
 }
-
-// Export cache pre použitie v iných súboroch
-export { productsCache };
