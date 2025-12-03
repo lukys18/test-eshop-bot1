@@ -367,6 +367,12 @@ async function sendMessage() {
     }
 
     const data = await response.json();
+    
+    // DEBUG: Zobraz info o produktovom kontexte
+    if (data._debug) {
+      console.log('🛒 PRODUCT CACHE DEBUG:', data._debug);
+    }
+    
     let reply = data.choices?.[0]?.message?.content?.trim() || "Prepáč, neviem na to odpovedať.";
 
     // Calculate response time

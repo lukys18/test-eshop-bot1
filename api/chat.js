@@ -77,6 +77,13 @@ export default async function handler(req, res) {
 
     const data = await response.json();
     
+    // Pridaj debug info do odpovede
+    data._debug = {
+      productContextLoaded: !!productContext,
+      productContextLength: productContext?.length || 0,
+      combinedContextLength: combinedContext?.length || 0
+    };
+    
     res.status(200).json(data);
   } catch (error) {
     console.error("API Error:", error);
@@ -99,31 +106,44 @@ function getLastUserMessage(messages) {
 
 // Načítanie produktového kontextu z cache
 async function getProductContextFromCache(query, host) {
+  console.log('🔍 getProductContextFromCache called with query:', query);
+  console.log('🔍 Host:', host);
+  
   try {
     // Načítaj produkty z cache endpointu
     const protocol = host?.includes('localhost') ? 'http' : 'https';
     const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : `${protocol}://${host}`;
+    
+    console.log('🔍 Fetching from:', `${baseUrl}/api/syncProducts`);
     
     const response = await fetch(`${baseUrl}/api/syncProducts`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' }
     });
 
+    console.log('🔍 Response status:', response.status);
+
     if (!response.ok) {
-      console.warn('Could not fetch cached products');
+      console.warn('❌ Could not fetch cached products, status:', response.status);
       return '';
     }
 
     const result = await response.json();
+    console.log('🔍 Result success:', result.success);
+    console.log('🔍 Result source:', result.source);
+    console.log('🔍 Products count:', result.data?.products?.length || 0);
     
     if (!result.success || !result.data?.products?.length) {
-      console.warn('No cached products available');
+      console.warn('❌ No cached products available');
       return '';
     }
 
     const products = result.data.products;
+    console.log('✅ Loaded', products.length, 'products from cache');
+    
     const normalizedQuery = normalizeText(query);
     const queryWords = normalizedQuery.split(/\s+/).filter(w => w.length > 2);
+    console.log('🔍 Query words:', queryWords);
 
     // Vyhľadaj relevantné produkty
     let relevantProducts = [];
