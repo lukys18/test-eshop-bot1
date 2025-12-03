@@ -1,21 +1,15 @@
 // api/syncProducts.js
-// Endpoint pre synchronizáciu produktov zo Shopify - volať raz denne (cron job alebo manuálne)
-// Ukladá produkty do Vercel KV alebo ako fallback do globálnej premennej
+// Endpoint pre synchronizáciu produktov zo Shopify
+// Používa Upstash Redis ako perzistentnú cache
 
-// Globálna cache pre produkty (fallback ak nemáme KV)
-let productsCache = {
-  products: [],
-  collections: [],
-  discounts: [],
-  lastSync: null,
-  totalProducts: 0
-};
+const CACHE_KEY = 'shopify_products';
+const CACHE_TTL_SECONDS = 24 * 60 * 60; // 24 hodín
 
 export default async function handler(req, res) {
   // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -23,98 +17,43 @@ export default async function handler(req, res) {
 
   const SHOPIFY_STORE_URL = process.env.SHOPIFY_STORE_URL;
   const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
-  const SYNC_SECRET = process.env.SYNC_SECRET || 'test-sync-secret'; // Pre ochranu endpointu
+  // Upstash/KV - podporuje obe pomenovania
+  const UPSTASH_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+  const UPSTASH_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 
-  // GET - vráti uložené produkty (alebo sync ak je cron)
-  if (req.method === 'GET') {
-    // Vercel Cron jobs posielajú GET s špeciálnym headerom
-    const isCronJob = req.headers['x-vercel-cron'] === '1' || req.query?.cron === 'true';
-    
-    if (isCronJob) {
-      // Presmeruj na sync logiku
-      return await performSync(SHOPIFY_STORE_URL, SHOPIFY_ACCESS_TOKEN, res);
-    }
-    
-    try {
-      // Skús načítať z KV ak je dostupné
-      let cachedData = null;
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  // Vercel Cron job - vynúť refresh
+  const isCronJob = req.headers['x-vercel-cron'] === '1';
+
+  try {
+    // Ak NIE je cron, skús najprv načítať z cache
+    if (!isCronJob && UPSTASH_URL && UPSTASH_TOKEN) {
+      const cachedData = await getFromUpstash(UPSTASH_URL, UPSTASH_TOKEN);
       
-      try {
-        if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
-          const kvResponse = await fetch(`${process.env.KV_REST_API_URL}/get/shopify_products`, {
-            headers: {
-              Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}`
-            }
-          });
-          if (kvResponse.ok) {
-            const kvData = await kvResponse.json();
-            if (kvData.result) {
-              cachedData = JSON.parse(kvData.result);
-            }
-          }
-        }
-      } catch (kvError) {
-        console.log('KV not available, using memory cache');
-      }
-
-      // Fallback na memory cache
-      if (!cachedData && productsCache.lastSync) {
-        cachedData = productsCache;
-      }
-
       if (cachedData && cachedData.products && cachedData.products.length > 0) {
+        console.log(`📦 Returning ${cachedData.products.length} products from Upstash cache`);
         return res.status(200).json({
           success: true,
           data: cachedData,
-          source: 'cache',
+          source: 'upstash-cache',
           lastSync: cachedData.lastSync
         });
       }
-
-      // Ak nemáme cache, vráť prázdne dáta s inštrukciou
-      return res.status(200).json({
-        success: false,
-        message: 'No cached products. Please run sync first by calling POST /api/syncProducts',
-        data: { products: [], collections: [], discounts: [], lastSync: null }
-      });
-
-    } catch (error) {
-      console.error('Error fetching cached products:', error);
-      return res.status(500).json({ error: 'Failed to fetch cached products', details: error.message });
-    }
-  }
-
-  // POST - synchronizuj produkty zo Shopify
-  if (req.method === 'POST') {
-    // Overenie secret tokenu
-    const authHeader = req.headers.authorization;
-    const providedSecret = authHeader?.replace('Bearer ', '') || req.body?.secret;
-    
-    // Vercel Cron jobs posielajú špeciálny header
-    const isCronJob = req.headers['x-vercel-cron'] === '1' || req.query?.cron === 'true';
-    
-    if (!isCronJob && providedSecret !== SYNC_SECRET) {
-      return res.status(401).json({ error: 'Unauthorized. Provide valid secret.' });
     }
 
-    return await performSync(SHOPIFY_STORE_URL, SHOPIFY_ACCESS_TOKEN, res);
-  }
-
-  return res.status(405).json({ error: 'Method not allowed' });
-}
-
-// Funkcia pre synchronizáciu produktov
-async function performSync(SHOPIFY_STORE_URL, SHOPIFY_ACCESS_TOKEN, res) {
-  if (!SHOPIFY_STORE_URL || !SHOPIFY_ACCESS_TOKEN) {
-    return res.status(500).json({ error: 'Shopify credentials not configured' });
-  }
-
-  try {
-    console.log('🔄 Starting Shopify sync...');
+    // Cache je prázdna alebo je to cron job - načítaj zo Shopify
+    console.log(isCronJob ? '⏰ Cron job - refreshing cache...' : '🔄 Cache empty, fetching from Shopify...');
     
-    // Načítaj VŠETKY produkty (s paginovaním)
+    if (!SHOPIFY_STORE_URL || !SHOPIFY_ACCESS_TOKEN) {
+      return res.status(500).json({ error: 'Shopify credentials not configured' });
+    }
+
+    // Načítaj produkty zo Shopify
     const allProducts = await fetchAllProducts(SHOPIFY_STORE_URL, SHOPIFY_ACCESS_TOKEN);
-    console.log(`📦 Fetched ${allProducts.length} products`);
+    console.log(`📦 Fetched ${allProducts.length} products from Shopify`);
 
     // Načítaj kolekcie
     let collections = [];
@@ -125,59 +64,64 @@ async function performSync(SHOPIFY_STORE_URL, SHOPIFY_ACCESS_TOKEN, res) {
       console.warn('Could not fetch collections:', e.message);
     }
 
-    // Načítaj zľavy
-    let discounts = [];
-    try {
-      discounts = await fetchDiscounts(SHOPIFY_STORE_URL, SHOPIFY_ACCESS_TOKEN);
-      console.log(`🏷️ Fetched ${discounts.length} discounts`);
-    } catch (e) {
-      console.warn('Could not fetch discounts:', e.message);
-    }
-
     const syncData = {
       products: allProducts,
       collections: collections,
-      discounts: discounts,
       totalProducts: allProducts.length,
       lastSync: new Date().toISOString()
     };
 
-    // Ulož do KV ak je dostupné
-    try {
-      if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
-        await fetch(`${process.env.KV_REST_API_URL}/set/shopify_products`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${process.env.KV_REST_API_TOKEN}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(JSON.stringify(syncData))
-        });
-        console.log('✅ Saved to Vercel KV');
-      }
-    } catch (kvError) {
-      console.log('KV save failed, using memory cache only');
+    // Ulož do Upstash
+    if (UPSTASH_URL && UPSTASH_TOKEN) {
+      await saveToUpstash(UPSTASH_URL, UPSTASH_TOKEN, syncData);
+      console.log('✅ Saved to Upstash Redis');
     }
-
-    // Vždy ulož aj do memory cache
-    productsCache = syncData;
-    console.log('✅ Saved to memory cache');
 
     return res.status(200).json({
       success: true,
-      message: 'Products synced successfully',
-      totalProducts: allProducts.length,
-      totalCollections: collections.length,
-      totalDiscounts: discounts.length,
-      syncedAt: syncData.lastSync
+      data: syncData,
+      source: 'shopify-fresh',
+      message: `Loaded ${allProducts.length} products`
     });
 
   } catch (error) {
-    console.error('❌ Sync error:', error);
-    return res.status(500).json({ 
-      error: 'Failed to sync products',
-      details: error.message 
+    console.error('❌ Error:', error);
+    return res.status(500).json({ error: 'Failed to fetch products', details: error.message });
+  }
+}
+
+// Upstash Redis funkcie
+async function getFromUpstash(url, token) {
+  try {
+    const response = await fetch(`${url}/get/${CACHE_KEY}`, {
+      headers: { Authorization: `Bearer ${token}` }
     });
+    
+    if (!response.ok) return null;
+    
+    const data = await response.json();
+    if (data.result) {
+      return JSON.parse(data.result);
+    }
+    return null;
+  } catch (e) {
+    console.warn('Upstash get error:', e.message);
+    return null;
+  }
+}
+
+async function saveToUpstash(url, token, data) {
+  const response = await fetch(`${url}/set/${CACHE_KEY}?EX=${CACHE_TTL_SECONDS}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(JSON.stringify(data))
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Upstash save failed: ${response.status}`);
   }
 }
 
