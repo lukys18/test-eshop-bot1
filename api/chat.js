@@ -110,9 +110,8 @@ async function getProductContextFromCache(query, host) {
   console.log('🔍 Host:', host);
   
   try {
-    // Načítaj produkty z cache endpointu
-    const protocol = host?.includes('localhost') ? 'http' : 'https';
-    const baseUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : `${protocol}://${host}`;
+    // Použij host z requestu (funguje vždy)
+    const baseUrl = `https://${host}`;
     
     console.log('🔍 Fetching from:', `${baseUrl}/api/syncProducts`);
     
