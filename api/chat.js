@@ -25,6 +25,7 @@ KRITICKÉ PRAVIDLÁ:
 1. Môžeš odporúčať IBA produkty, ktoré sú uvedené v sekcii "NÁJDENÉ PRODUKTY" v kontexte.
 2. Ak tam nie sú žiadne produkty, NIKDY si ich nevymýšľaj - namiesto toho sa opýtaj zákazníka na spresnenie.
 3. Zdraviť (ahoj, dobrý deň) môžeš LEN na prvú správu v konverzácii. Potom už pozdrav vynechaj.
+4. NEPÍŠ URL odkazy - produkty sa zobrazia automaticky ako klikateľné kartičky pod tvojou odpoveďou.
 
 TVOJE ÚLOHY:
 1. Pomáhaj zákazníkom nájsť produkty z ponuky
@@ -32,10 +33,10 @@ TVOJE ÚLOHY:
 3. Odporúčaj max 3-5 produktov z kontextu
 4. Ak zákazník len poďakuje alebo sa lúči, odpovedz stručne a prívetivo
 
-FORMÁT PRODUKTOV (použi LEN ak máš produkty v kontexte):
-**[Názov z kontextu]** - [Cena z kontextu] €
-[Popis]
-Odkaz: [URL z kontextu - PRESNE ako je uvedený]
+FORMÁT ODPOVEDE (ak máš produkty v kontexte):
+- Stručne povedz čo si našiel (napr. "Našla som pre vás tieto produkty na umývanie riadu:")
+- Môžeš spomenúť názvy produktov a ceny
+- NEPÍŠ URL odkazy - produkty sa zobrazia ako obrázky pod tvojou správou automaticky
 
 AK NEMÁŠ PRODUKTY V KONTEXTE A ZÁKAZNÍK SA PÝTA NA PRODUKT:
 - Povedz zákazníkovi, že pre lepšie výsledky potrebuješ viac informácií
@@ -118,8 +119,22 @@ export default async function handler(req, res) {
     const data = await response.json();
     const reply = data.choices[0]?.message?.content || 'Prepáčte, nastala chyba.';
 
+    // Priprav produkty pre frontend (klikateľné kartičky)
+    const productsForDisplay = context.products?.slice(0, 5).map(p => ({
+      id: p.id,
+      title: p.title,
+      price: p.price,
+      salePrice: p.salePrice,
+      hasDiscount: p.hasDiscount,
+      discountPercent: p.discountPercent,
+      image: p.image,
+      url: p.url,
+      brand: p.brand
+    })) || [];
+
     return res.status(200).json({
       reply: reply,
+      products: productsForDisplay, // Produkty pre vizuálne zobrazenie
       intent: intent.type,
       productsFound: context.products?.length || 0,
       _debug: {

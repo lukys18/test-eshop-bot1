@@ -311,6 +311,7 @@ async function sendMessage() {
 
     const data = await response.json();
     let reply = data.reply || "Prepáčte, nastala chyba pri spracovaní.";
+    const products = data.products || []; // Produkty pre kartičky
 
     // Calculate response time
     const timeToRespond = Date.now() - startTime;
@@ -321,7 +322,14 @@ async function sendMessage() {
                             reply.includes("zavolajte");
 
     removeLastBotMessage();
+    
+    // Najprv pridaj textovú odpoveď
     appendMessage("Asistent", reply, "bot", false, false, isContactRelated);
+    
+    // Ak máme produkty, zobraz ich ako klikateľné kartičky
+    if (products.length > 0) {
+      appendProductCards(products);
+    }
     
     // Pridaj odpoveď asistenta do histórie
     chatHistory.push({ role: "assistant", content: reply });
@@ -576,6 +584,47 @@ async function saveEmailEventToAPI(botSuccessMessage, emailMessageIndex) {
     function removeLastBotMessage() {
       const tempMsg = chatbox.querySelector(".bot.temp");
       if (tempMsg) chatbox.removeChild(tempMsg);
+    }
+
+    // Funkcia na zobrazenie produktových kartičiek
+    function appendProductCards(products) {
+      const cardsContainer = document.createElement('div');
+      cardsContainer.className = 'product-cards-container';
+      
+      products.forEach(product => {
+        const card = document.createElement('a');
+        card.href = product.url;
+        card.target = '_blank';
+        card.className = 'product-card';
+        
+        // Cena s možnou zľavou
+        let priceHtml = '';
+        if (product.hasDiscount && product.salePrice) {
+          priceHtml = `
+            <span class="product-price-old">${product.price.toFixed(2)}€</span>
+            <span class="product-price-sale">${product.salePrice.toFixed(2)}€</span>
+            <span class="product-discount">-${product.discountPercent}%</span>
+          `;
+        } else {
+          priceHtml = `<span class="product-price">${product.price.toFixed(2)}€</span>`;
+        }
+        
+        card.innerHTML = `
+          <div class="product-image-wrapper">
+            <img src="${product.image}" alt="${product.title}" class="product-image" onerror="this.src='https://via.placeholder.com/80?text=Produkt'">
+          </div>
+          <div class="product-info">
+            <div class="product-title">${product.title}</div>
+            <div class="product-brand">${product.brand || ''}</div>
+            <div class="product-price-row">${priceHtml}</div>
+          </div>
+        `;
+        
+        cardsContainer.appendChild(card);
+      });
+      
+      chatbox.appendChild(cardsContainer);
+      chatbox.scrollTop = chatbox.scrollHeight;
     }
 
 
