@@ -207,11 +207,60 @@ async function saveProductsAndBuildIndex(redis, products) {
 
   const pipeline = redis.pipeline();
   
+  // Slovenské synonymá pre lepšie vyhľadávanie
+  const SYNONYMS = {
+    'sampon': ['šampón', 'šampon', 'sampon'],
+    'sampon': ['šampón', 'šampon', 'sampon'],
+    'gel': ['gél', 'gel'],
+    'krem': ['krém', 'krem'],
+    'mydlo': ['mydlo', 'mýdlo'],
+    'praci': ['prací', 'praci'],
+    'prasok': ['prášok', 'prasok'],
+    'cistic': ['čistič', 'čistiaci', 'cistic', 'cistiaci'],
+    'avivaž': ['aviváž', 'avivaz'],
+    'dezodorant': ['dezodorant', 'deo', 'antiperspirant'],
+    'parfem': ['parfém', 'parfem', 'voňavka'],
+    'zubna': ['zubná', 'zubna'],
+    'pasta': ['pasta'],
+    'vlasy': ['vlasy', 'vlasový', 'vlasova'],
+    'telo': ['telo', 'telovej', 'telový'],
+    'riad': ['riad', 'riady', 'umývanie'],
+    'wc': ['wc', 'záchod', 'toaleta', 'toaletný'],
+    'podlaha': ['podlaha', 'podlahy', 'podlahový'],
+    'okno': ['okno', 'okná', 'sklo'],
+    'kupelna': ['kúpeľňa', 'kupelna', 'kúpeľ'],
+    'kuchyna': ['kuchyňa', 'kuchyna', 'kuchynský']
+  };
+  
   for (const product of products) {
     pipeline.set(`p:${product.id}`, JSON.stringify(product));
     
-    const searchText = `${product.title} ${product.brand} ${product.categoryMain}`.toLowerCase();
-    const words = normalizeText(searchText).split(/\s+/).filter(w => w.length >= 2);
+    // Rozšírený searchText - zahŕňa všetko dôležité
+    const searchParts = [
+      product.title,
+      product.title, // Zdvojnásobiť title pre väčšiu váhu
+      product.brand,
+      product.brand, // Zdvojnásobiť brand
+      product.description || '',
+      product.categoryMain || '',
+      ...(product.categoryPath || []),
+      product.categorySub || ''
+    ];
+    
+    const searchText = searchParts.join(' ').toLowerCase();
+    let words = normalizeText(searchText).split(/\s+/).filter(w => w.length >= 2);
+    
+    // Pridaj synonymá
+    const extraWords = [];
+    for (const word of words) {
+      for (const [key, synonyms] of Object.entries(SYNONYMS)) {
+        if (synonyms.some(s => normalizeText(s) === word || word.includes(normalizeText(s)))) {
+          extraWords.push(key);
+          synonyms.forEach(s => extraWords.push(normalizeText(s)));
+        }
+      }
+    }
+    words = [...new Set([...words, ...extraWords])];
     
     docLengths.set(product.id, words.length);
     totalDocLength += words.length;
@@ -300,8 +349,40 @@ function normalizeText(text) {
   return String(text || '')
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\w\s]/g, ' ')
+    .replace(/[\u0300-\u036f]/g, '') // Odstráň diakritiku
+    .replace(/[^a-z0-9\s]/g, ' ')    // Len alfanumerické znaky
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+// Extrakcia kľúčových slov z produktu
+function extractKeywords(product) {
+  const keywords = [];
+  
+  // Z názvu
+  if (product.title) {
+    const titleWords = normalizeText(product.title).split(/\s+/);
+    keywords.push(...titleWords);
+  }
+  
+  // Zo značky
+  if (product.brand) {
+    keywords.push(normalizeText(product.brand));
+  }
+  
+  // Z kategórií
+  if (product.categoryPath) {
+    product.categoryPath.forEach(cat => {
+      const catWords = normalizeText(cat).split(/\s+/);
+      keywords.push(...catWords);
+    });
+  }
+  
+  // Z popisu - len prvých 50 slov
+  if (product.description) {
+    const descWords = normalizeText(product.description).split(/\s+/).slice(0, 50);
+    keywords.push(...descWords);
+  }
+  
+  return [...new Set(keywords.filter(w => w.length >= 2))];
 }
