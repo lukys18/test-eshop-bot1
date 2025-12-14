@@ -244,6 +244,14 @@ function analyzeIntent(message) {
     return { type: 'general_question' };
   }
   
+  // Konverzačné otázky o pomoci (bez konkrétneho produktu)
+  if (/v\s*čom.*porad|čo.*porad|ako.*pomôž|s\s*čím.*pomôž|čo.*odporúč|čo.*ďalšie|čo.*ponúka/i.test(lower) ||
+      /pomôž.*mi|poraď.*mi|čo.*vie[šm]/i.test(lower) ||
+      /aké.*máte.*produkt|čo.*všetko.*máte/i.test(lower)) {
+    console.log('💬 Rozpoznaný zámer: konverzačná otázka o pomoci');
+    return { type: 'conversation' };
+  }
+  
   // Zľavy/akcie
   if (/zlav|akci|výpredaj|lacn|znížen|promo/i.test(lower)) {
     console.log('💰 Rozpoznaný zámer: zľavy');
