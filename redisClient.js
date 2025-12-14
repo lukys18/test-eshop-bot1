@@ -1,227 +1,248 @@
 // redisClient.js
-// Upstash Redis klient pre Vercel Serverless Functions
-// Optimalizovaný pre vyhľadávanie v 26k+ produktoch
+// BM25 vyhľadávací systém pre Upstash Redis
+// Optimalizovaný pre slovenské produkty s konverzačným AI prístupom
 
 import { Redis } from '@upstash/redis';
 
-// Lazy initialization pre Vercel serverless
 let redis = null;
 
-function getRedisClient() {
-  if (!redis) {
-    const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-    const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-    
-    if (!url || !token) {
-      throw new Error('Upstash Redis credentials not configured');
-    }
-    
-    redis = new Redis({ url, token });
+export function getRedisClient() {
+  if (redis) return redis;
+  
+  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+  
+  if (!url || !token) {
+    throw new Error('Redis not configured');
   }
+  
+  redis = new Redis({ url, token });
   return redis;
 }
 
-/**
- * Vyhľadávanie produktov pomocou inverzného indexu
- * @param {string} query - Vyhľadávací dotaz
- * @param {number} limit - Max počet výsledkov
- * @returns {Promise<Array>} Nájdené produkty
- */
-export async function searchProducts(query, limit = 20) {
-  const redis = getRedisClient();
-  const words = extractSearchWords(query);
+// BM25 parametre
+const BM25_K1 = 1.2;
+const BM25_B = 0.75;
+
+// Hlavná vyhľadávacia funkcia s BM25
+export async function searchProducts(query, options = {}) {
+  const { 
+    limit = 5, 
+    category = null, 
+    brand = null,
+    onlyAvailable = true 
+  } = options;
   
-  if (words.length === 0) {
-    return [];
+  const redis = getRedisClient();
+  
+  const normalizedQuery = normalizeText(query);
+  const queryTerms = normalizedQuery.split(/\s+/).filter(w => w.length >= 2);
+  
+  if (queryTerms.length === 0) {
+    return { products: [], total: 0, query: query };
   }
   
-  try {
-    // Získaj ID produktov pre každé slovo z indexu
-    const wordIndex = await redis.hgetall('index:words') || {};
-    const productScores = new Map(); // productId -> score
-    
-    for (const word of words) {
-      // Hľadaj presné aj čiastočné zhody
-      for (const [indexWord, idsJson] of Object.entries(wordIndex)) {
-        if (indexWord.includes(word) || word.includes(indexWord)) {
-          const ids = typeof idsJson === 'string' ? JSON.parse(idsJson) : idsJson;
-          const matchScore = indexWord === word ? 10 : 5; // Presná zhoda = vyššie skóre
-          
-          for (const id of ids) {
-            productScores.set(id, (productScores.get(id) || 0) + matchScore);
-          }
-        }
+  const N = parseInt(await redis.get('products:count')) || 1;
+  const avgDocLen = parseFloat(await redis.get('products:avgDocLen')) || 10;
+  
+  const wordIndex = {};
+  for (const term of queryTerms) {
+    const data = await redis.hget('idx:words', term);
+    if (data) {
+      wordIndex[term] = typeof data === 'string' ? JSON.parse(data) : data;
+    }
+  }
+  
+  let candidateIds = new Set();
+  for (const term of queryTerms) {
+    if (wordIndex[term]) {
+      for (const id of Object.keys(wordIndex[term])) {
+        candidateIds.add(id);
       }
     }
-    
-    // Zoraď podľa skóre a vezmi top výsledky
-    const sortedIds = [...productScores.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, limit)
-      .map(([id]) => id);
-    
-    if (sortedIds.length === 0) {
-      return [];
-    }
-    
-    // Načítaj produkty
-    const products = await getProductsByIds(sortedIds);
-    
-    // Pridaj skóre k produktom
-    return products.map(p => ({
-      ...p,
-      score: productScores.get(p.id) || 0
-    }));
-    
-  } catch (error) {
-    console.error('Search error:', error);
-    return [];
-  }
-}
-
-/**
- * Získanie produktov podľa ID
- * @param {Array<string>} ids - Zoznam ID produktov
- * @returns {Promise<Array>} Produkty
- */
-export async function getProductsByIds(ids) {
-  if (!ids || ids.length === 0) return [];
-  
-  const redis = getRedisClient();
-  const pipeline = redis.pipeline();
-  
-  for (const id of ids) {
-    pipeline.get(`product:${id}`);
   }
   
-  const results = await pipeline.exec();
-  
-  return results
-    .filter(r => r !== null)
-    .map(r => typeof r === 'string' ? JSON.parse(r) : r);
-}
-
-/**
- * Získanie produktov podľa kategórie
- * @param {string} category - Názov kategórie
- * @param {number} limit - Max počet výsledkov
- * @returns {Promise<Array>} Produkty
- */
-export async function getProductsByCategory(category, limit = 50) {
-  const redis = getRedisClient();
-  const normalizedCat = normalizeForIndex(category);
-  
-  const categoriesIndex = await redis.hgetall('index:categories') || {};
-  
-  let matchingIds = [];
-  for (const [cat, idsJson] of Object.entries(categoriesIndex)) {
-    if (cat.includes(normalizedCat) || normalizedCat.includes(cat)) {
-      const ids = typeof idsJson === 'string' ? JSON.parse(idsJson) : idsJson;
-      matchingIds = matchingIds.concat(ids);
+  if (category) {
+    const catData = await redis.hget('idx:categories', normalizeText(category));
+    if (catData) {
+      const catIds = new Set(typeof catData === 'string' ? JSON.parse(catData) : catData);
+      candidateIds = new Set([...candidateIds].filter(id => catIds.has(id)));
     }
   }
   
-  // Unique a limit
-  const uniqueIds = [...new Set(matchingIds)].slice(0, limit);
-  return getProductsByIds(uniqueIds);
-}
-
-/**
- * Získanie produktov podľa značky
- * @param {string} brand - Názov značky
- * @param {number} limit - Max počet výsledkov
- * @returns {Promise<Array>} Produkty
- */
-export async function getProductsByBrand(brand, limit = 50) {
-  const redis = getRedisClient();
-  const normalizedBrand = normalizeForIndex(brand);
-  
-  const brandsIndex = await redis.hgetall('index:brands') || {};
-  
-  let matchingIds = [];
-  for (const [b, idsJson] of Object.entries(brandsIndex)) {
-    if (b.includes(normalizedBrand) || normalizedBrand.includes(b)) {
-      const ids = typeof idsJson === 'string' ? JSON.parse(idsJson) : idsJson;
-      matchingIds = matchingIds.concat(ids);
+  if (brand) {
+    const brandData = await redis.hget('idx:brands', normalizeText(brand));
+    if (brandData) {
+      const brandIds = new Set(typeof brandData === 'string' ? JSON.parse(brandData) : brandData);
+      candidateIds = new Set([...candidateIds].filter(id => brandIds.has(id)));
     }
   }
   
-  const uniqueIds = [...new Set(matchingIds)].slice(0, limit);
-  return getProductsByIds(uniqueIds);
-}
-
-/**
- * Získanie všetkých kategórií
- * @returns {Promise<Array>} Zoznam kategórií s počtom produktov
- */
-export async function getAllCategories() {
-  const redis = getRedisClient();
-  const categoriesIndex = await redis.hgetall('index:categories') || {};
+  if (candidateIds.size === 0) {
+    return { products: [], total: 0, query: query };
+  }
   
-  return Object.entries(categoriesIndex).map(([name, idsJson]) => {
-    const ids = typeof idsJson === 'string' ? JSON.parse(idsJson) : idsJson;
-    return { name, count: ids.length };
-  }).sort((a, b) => b.count - a.count);
-}
-
-/**
- * Získanie všetkých značiek
- * @returns {Promise<Array>} Zoznam značiek s počtom produktov
- */
-export async function getAllBrands() {
-  const redis = getRedisClient();
-  const brandsIndex = await redis.hgetall('index:brands') || {};
+  const docLengths = {};
+  const candidateArray = [...candidateIds];
+  for (let i = 0; i < candidateArray.length; i += 100) {
+    const batch = candidateArray.slice(i, i + 100);
+    for (const id of batch) {
+      const len = await redis.hget('idx:docLengths', id);
+      docLengths[id] = parseInt(len) || avgDocLen;
+    }
+  }
   
-  return Object.entries(brandsIndex).map(([name, idsJson]) => {
-    const ids = typeof idsJson === 'string' ? JSON.parse(idsJson) : idsJson;
-    return { name, count: ids.length };
-  }).sort((a, b) => b.count - a.count);
-}
-
-/**
- * Získanie metadát o produktoch
- * @returns {Promise<Object>} Metadáta
- */
-export async function getProductsMetadata() {
-  const redis = getRedisClient();
+  const scores = [];
+  for (const docId of candidateIds) {
+    let score = 0;
+    const docLen = docLengths[docId] || avgDocLen;
+    
+    for (const term of queryTerms) {
+      const termDocs = wordIndex[term];
+      if (!termDocs || !termDocs[docId]) continue;
+      
+      const tf = termDocs[docId];
+      const df = Object.keys(termDocs).length;
+      
+      const idf = Math.log((N - df + 0.5) / (df + 0.5) + 1);
+      const tfNorm = (tf * (BM25_K1 + 1)) / (tf + BM25_K1 * (1 - BM25_B + BM25_B * (docLen / avgDocLen)));
+      
+      score += idf * tfNorm;
+    }
+    
+    if (score > 0) {
+      scores.push({ id: docId, score });
+    }
+  }
   
-  const [lastUpdate, count] = await Promise.all([
-    redis.get('products:last_update'),
-    redis.get('products:count')
-  ]);
+  scores.sort((a, b) => b.score - a.score);
+  const topResults = scores.slice(0, limit * 2);
+  
+  const products = [];
+  for (const { id, score } of topResults) {
+    const data = await redis.get(`p:${id}`);
+    if (data) {
+      const product = typeof data === 'string' ? JSON.parse(data) : data;
+      if (onlyAvailable && !product.available) continue;
+      products.push({ ...product, _score: score });
+      if (products.length >= limit) break;
+    }
+  }
   
   return {
-    lastUpdate,
-    count: parseInt(count) || 0
+    products,
+    total: scores.length,
+    query: query,
+    matchedTerms: queryTerms.filter(t => wordIndex[t])
   };
 }
 
-/**
- * Získanie náhodných produktov (pre odporúčania)
- * @param {number} limit - Počet produktov
- * @returns {Promise<Array>} Náhodné produkty
- */
-export async function getRandomProducts(limit = 10) {
+// Získanie kategórií pre konverzačný AI
+export async function getCategories() {
+  const redis = getRedisClient();
+  const catData = await redis.hgetall('idx:categories');
+  
+  if (!catData) return [];
+  
+  const categories = [];
+  for (const [name, ids] of Object.entries(catData)) {
+    const idList = typeof ids === 'string' ? JSON.parse(ids) : ids;
+    categories.push({
+      name: name,
+      count: idList.length
+    });
+  }
+  
+  return categories.sort((a, b) => b.count - a.count);
+}
+
+// Získanie značiek
+export async function getBrands() {
+  const redis = getRedisClient();
+  const brandData = await redis.hgetall('idx:brands');
+  
+  if (!brandData) return [];
+  
+  const brands = [];
+  for (const [name, ids] of Object.entries(brandData)) {
+    const idList = typeof ids === 'string' ? JSON.parse(ids) : ids;
+    brands.push({
+      name: name,
+      count: idList.length
+    });
+  }
+  
+  return brands.sort((a, b) => b.count - a.count);
+}
+
+// Získanie produktu podľa ID
+export async function getProductById(id) {
+  const redis = getRedisClient();
+  const data = await redis.get(`p:${id}`);
+  if (!data) return null;
+  return typeof data === 'string' ? JSON.parse(data) : data;
+}
+
+// Získanie náhodných produktov z kategórie
+export async function getRandomFromCategory(category, limit = 3) {
+  const redis = getRedisClient();
+  const catData = await redis.hget('idx:categories', normalizeText(category));
+  
+  if (!catData) return [];
+  
+  const ids = typeof catData === 'string' ? JSON.parse(catData) : catData;
+  const shuffled = ids.sort(() => Math.random() - 0.5);
+  const selected = shuffled.slice(0, limit);
+  
+  const products = [];
+  for (const id of selected) {
+    const product = await getProductById(id);
+    if (product && product.available) {
+      products.push(product);
+    }
+  }
+  
+  return products;
+}
+
+// Zistenie zľavnených produktov
+export async function getDiscountedProducts(limit = 5) {
+  const redis = getRedisClient();
+  const allIds = await redis.smembers('products:ids');
+  
+  const discounted = [];
+  for (const id of allIds) {
+    if (discounted.length >= limit * 3) break;
+    const product = await getProductById(id);
+    if (product && product.hasDiscount && product.available) {
+      discounted.push(product);
+    }
+  }
+  
+  discounted.sort((a, b) => b.discountPercent - a.discountPercent);
+  return discounted.slice(0, limit);
+}
+
+// Štatistiky databázy
+export async function getStats() {
   const redis = getRedisClient();
   
-  const allIds = await redis.smembers('products:all_ids');
-  if (!allIds || allIds.length === 0) return [];
+  const count = await redis.get('products:count');
+  const lastUpdate = await redis.get('products:lastUpdate');
+  const categories = await getCategories();
+  const brands = await getBrands();
   
-  // Náhodný výber
-  const shuffled = allIds.sort(() => 0.5 - Math.random());
-  const selectedIds = shuffled.slice(0, limit);
-  
-  return getProductsByIds(selectedIds);
+  return {
+    productCount: parseInt(count) || 0,
+    lastUpdate: lastUpdate || 'unknown',
+    categoryCount: categories.length,
+    brandCount: brands.length,
+    topCategories: categories.slice(0, 5),
+    topBrands: brands.slice(0, 5)
+  };
 }
 
-// Pomocné funkcie
-function extractSearchWords(text) {
-  return normalizeForIndex(text)
-    .split(/\s+/)
-    .filter(word => word.length >= 2);
-}
-
-function normalizeForIndex(text) {
+function normalizeText(text) {
   return String(text || '')
     .toLowerCase()
     .normalize('NFD')
@@ -230,6 +251,4 @@ function normalizeForIndex(text) {
     .replace(/\s+/g, ' ')
     .trim();
 }
-
-export default getRedisClient;
 

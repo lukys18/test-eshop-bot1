@@ -55,42 +55,11 @@
 
 
   
-<script src="database.js"></script>
-<script src="rag-system.js"></script>
+<!-- API-based RAG system - no local scripts needed -->
 
   <script>
-    let chatHistory = [
-      {
-        role: "system",
-        content: `Si priateľský a nápomocný AI asistent pre e-shop Drogéria Domov (drogeriadomov.sk). 
-
-TVOJE HLAVNÉ ÚLOHY:
-1) VYHĽADÁVANIE PRODUKTOV - Pomôž zákazníkom nájsť drogériu, kozmetiku, čistiace prostriedky, hygienické potreby a ďalšie produkty.
-2) ODPORÚČANIA - Na základe potrieb zákazníka odporuč vhodné produkty. Vždy vysvetli PREČO daný produkt odporúčaš.
-3) INFORMÁCIE O PRODUKTOCH - Uvádzaj názov, cenu, dostupnosť, značku a popis produktu.
-4) PORADENSTVO - Poraď s výberom produktov pre rôzne potreby (upratovanie, starostlivosť o pleť, vlasy, domácnosť atď.).
-
-PRAVIDLÁ:
-- VŽDY používaj informácie z kontextu - produkty, ceny, dostupnosť
-- Pri produktoch VŽDY uveď: názov, cenu (€), či je skladom
-- Ak je produkt v zľave, zdôrazni pôvodnú a novú cenu
-- Ak produkt nie je dostupný, ponúkni podobné alternatívy
-- Odpovedaj v slovenčine, priateľsky a profesionálne
-- Buď stručný ale informatívny
-- Pri odporúčaniach vždy vysvetli prečo daný produkt odporúčaš
-- Ak nemáš dostatok informácií, povedz že produkt hľadáš alebo odporuč kontaktovať zákaznícku podporu
-- PAMÄTAJ SI celú konverzáciu
-
-KATEGÓRIE PRODUKTOV:
-- Drogéria a kozmetika
-- Čistiace a upratovacie prostriedky
-- Starostlivosť o telo a vlasy
-- Hygienické potreby
-- Domáce potreby
-- Produkty pre deti
-- Pracie prostriedky`
-      }
-    ];
+    // Jednoduchá história konverzácie (len user/assistant)
+    let chatHistory = [];
 
     // Session management
     let sessionId = null;
@@ -117,27 +86,21 @@ KATEGÓRIE PRODUKTOV:
       console.log('📧 Email submitted flag set to TRUE for session:', sessionId);
     }
 
-    // Inicializácia RAG systému po načítaní databázy
-    let ragSystem = null;
+    // Inicializácia
     document.addEventListener('DOMContentLoaded', function() {
       // Initialize session
       getSessionId();
       
-      if (window.aiPowerData && window.RAGSystem) {
-        ragSystem = new window.RAGSystem(window.aiPowerData.knowledgeBase);
-        console.log('RAG systém inicializovaný s', window.aiPowerData.knowledgeBase.length, 'záznamami');
-      }
-      
       // Zobrazenie úvodnej správy
-      appendMessage("Drogéria Domov", "Dobrý deň! 👋 Som váš virtuálny asistent pre e-shop Drogéria Domov. Pomôžem vám nájsť produkty, poradím s výberom alebo zodpoviem vaše otázky. Ako vám môžem pomôcť?", "bot", false, false, false);
+      appendMessage("Drogéria Domov", "Dobrý deň! Som váš virtuálny asistent pre Drogériu Domov. Pomôžem vám nájsť produkty, poradím s výberom alebo zodpoviem vaše otázky. Čo pre vás môžem urobiť?", "bot", false, false, false);
       const quickRepliesDiv = document.createElement('div');
       quickRepliesDiv.className = 'quick-replies';
       quickRepliesDiv.innerHTML = `
-        <button class="quick-reply-btn" onclick="handleQuickReply('Hľadám čistiace prostriedky')">Čistiace prostriedky</button>
-        <button class="quick-reply-btn" onclick="handleQuickReply('Hľadám kozmetiku')">Kozmetika</button>
-        <button class="quick-reply-btn" onclick="handleQuickReply('Pracie prášky a gély')">Pracie prostriedky</button>
-        <button class="quick-reply-btn" onclick="handleQuickReply('Máte nejaké akcie?')">Akcie a zľavy</button>
-        <button class="quick-reply-btn" onclick="handleQuickReply('Potrebujem poradiť s výberom')">Poradenstvo</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Hľadám niečo na upratovanie')">Upratovanie</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Potrebujem kozmetiku')">Kozmetika</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Hľadám prací prášok')">Pranie</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Máte nejaké zľavy?')">Zľavy</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Poraďte mi prosím')">Poradenstvo</button>
       `;
       chatbox.appendChild(quickRepliesDiv);
     });
@@ -325,125 +288,51 @@ async function sendMessage() {
   appendMessage("Asistent", "typing", "bot", true);
 
   try {
-    await delay(800);
+    await delay(600);
 
-    // RAG vyhľadávanie relevantného obsahu
-    let relevantContent = [];
-    let ragContext = '';
-    let sources = [];
-    let useRAG = false;
-    let detectedCategory = 'všeobecné'; // Default category
-    let isProductQuery = false;
+    // Kategorizuj správu
+    const category = categorizeMessage(message);
 
-    if (ragSystem) {
-      // Kontrola či je to produktový dotaz
-      isProductQuery = ragSystem.isProductQuery(message);
-      const productIntent = ragSystem.detectProductIntent(message);
-      
-      relevantContent = ragSystem.searchRelevantContent(message, 3);
-      if (relevantContent.length > 0) {
-        ragContext = ragSystem.buildContext(relevantContent);
-        sources = relevantContent.map(item => item.title);
-        useRAG = true;
-        
-        // Determine category based on highest scoring RAG result
-        if (relevantContent[0] && relevantContent[0].title) {
-          const topResult = relevantContent[0].title.toLowerCase();
-          
-          if (topResult.includes('produkt') || topResult.includes('tovar') || isProductQuery) {
-            detectedCategory = 'produkty';
-          } else if (topResult.includes('cen') || topResult.includes('zlav') || topResult.includes('akci')) {
-            detectedCategory = 'ceny';
-          } else if (topResult.includes('kontakt') || topResult.includes('podpora')) {
-            detectedCategory = 'kontakt';
-          } else if (topResult.includes('doprav') || topResult.includes('doruc')) {
-            detectedCategory = 'doprava';
-          } else if (topResult.includes('vrat') || topResult.includes('reklam')) {
-            detectedCategory = 'reklamácie';
-          }
-        }
-        
-        console.log('Používam RAG s kontextom:', sources);
-        console.log('📊 Detekovaná kategória z RAG:', detectedCategory);
-        console.log('🛒 Je produktový dotaz:', isProductQuery, '| Intent:', productIntent);
-      }
-    }
-    
-    // Fallback: Use keyword-based categorization if RAG didn't find anything
-    if (!useRAG) {
-      detectedCategory = categorizeMessage(message);
-    }
-
-    // API volanie s kompletnou históriou a RAG kontextom
-    // RAG kontext bude vložený na serveri ako system správa pred poslednú user správu
+    // API volanie s históriou konverzácie
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({ 
-        messages: chatHistory, // Celá história konverzácie
-        useRAG: useRAG,
-        ragContext: ragContext,
-        sources: sources,
-        isProductQuery: isProductQuery
+        message: message,
+        history: chatHistory.slice(-6) // Posledných 6 správ pre kontext
       })
     });
 
     if (!response.ok) {
-     throw new Error(`Chyba ${response.status}: ${response.statusText}`);
+      throw new Error(`Chyba ${response.status}: ${response.statusText}`);
     }
 
     const data = await response.json();
-    
-    // DEBUG: Zobraz info o produktovom kontexte
-    if (data._debug) {
-      console.log('🛒 PRODUCT CACHE DEBUG:', data._debug);
-    }
-    
-    let reply = data.choices?.[0]?.message?.content?.trim() || "Prepáč, neviem na to odpovedať.";
+    let reply = data.reply || "Prepáčte, nastala chyba pri spracovaní.";
 
     // Calculate response time
     const timeToRespond = Date.now() - startTime;
-    
-    // Use RAG-detected category (already set above)
-    const category = detectedCategory;
 
-    // Kontrola či odpoveď obsahuje "nemám presné informácie" alebo podobné frázy
-    const isInsufficientAnswer = reply.includes("nemám presné informácie") || 
-                                reply.includes("kontaktujte nás") ||
-                                reply.includes("neviem na to odpovedať") ||
-                                reply.includes("nemám dostatok informácií");
-
-    // Kontrola či odpoveď obsahuje kontaktné informácie
+    // Kontrola či odpoveď obsahuje potrebu kontaktu
     const isContactRelated = reply.includes("kontakt") || 
-                            reply.includes("telefón") || 
-                            reply.includes("email") ||
-                            reply.includes("+421") ||
-                            sources.some(source => source.toLowerCase().includes("kontakt"));
+                            reply.includes("napíšte nám") ||
+                            reply.includes("zavolajte");
 
     removeLastBotMessage();
-    appendMessage("Asistent", reply, "bot", false, false, isInsufficientAnswer || isContactRelated);
+    appendMessage("Asistent", reply, "bot", false, false, isContactRelated);
     
-    // Pridaj odpoveď asistenta do histórie pre budúcu pamäť
+    // Pridaj odpoveď asistenta do histórie
     chatHistory.push({ role: "assistant", content: reply });
 
-    // ============================================================
-    // AUTOMATIC CHAT SAVING TO VERCEL API WITH METRICS
-    // This sends every conversation to your Vercel database endpoint
-    // ============================================================
+    // Ulož chat do API
     saveChatToAPI(message, reply, currentMessageIndex, timeToRespond, category);
 
   } catch (error) {
     console.error("Chyba:", error);
     removeLastBotMessage();
-    
-    // Fallback pre lokálne testovanie
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      appendMessage("Asistent", "Na túto otázku neviem dostatočne odpovedať.", "bot", false, false, true);
-    } else {
-      appendMessage("Asistent", `Ups, nastala chyba: ${error.message}`, "bot");
-    }
+    appendMessage("Asistent", "Prepáčte, nastala technická chyba. Skúste to prosím znovu.", "bot", false, false, true);
   }
 }
 

@@ -1,279 +1,266 @@
 // api/chat.js
-// Chat endpoint s RAG systémom pre XML produkty z Redis
+// Konverzačný AI asistent pre Drogériu Domov
+// Optimalizovaný pre poradenstvo a cielené odporúčania
 
-import { searchProducts, getProductsMetadata, getAllCategories } from '../redisClient.js';
+import { searchProducts, getCategories, getBrands, getStats, getDiscountedProducts } from '../redisClient.js';
 
-// RAG konfigurácia
-const STOP_WORDS = new Set([
-  'a', 'je', 'to', 'na', 'v', 'sa', 'so', 'pre', 'ako', 'že', 'ma', 'mi', 'me', 'si', 'su', 'som',
-  'ale', 'ani', 'az', 'ak', 'bo', 'by', 'co', 'ci', 'do', 'ho', 'im', 'ju', 'ka', 'ku',
-  'ne', 'ni', 'no', 'od', 'po', 'pri', 'ta', 'te', 'ti', 'tu', 'ty', 'uz', 'vo', 'za',
-  'mate', 'mam', 'chcem', 'potrebujem', 'the', 'and', 'or', 'is', 'are', 'this', 'that'
-]);
+const DEEPSEEK_API_KEY = process.env.API_KEY;
+const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 
-const SYNONYMS = {
-  'cena': ['cenny', 'ceny', 'kolko', 'stoji', 'price', 'eur', 'euro', 'cennik'],
-  'produkt': ['tovar', 'vyrobok', 'artikl', 'polozka', 'item', 'produkty', 'sortiment'],
-  'dostupny': ['skladom', 'dispozicii', 'sklade', 'available', 'mame', 'dostupnost', 'dostupne'],
-  'zlava': ['akcia', 'discount', 'sale', 'zlacnene', 'promo', 'kupon', 'vypredaj'],
-  'kupit': ['objednat', 'nakupit', 'buy', 'purchase', 'order', 'kosik'],
-  'hladat': ['najst', 'vyhladat', 'search', 'find', 'kde', 'aky', 'ktory', 'odporucit', 'poradit'],
-  'velkost': ['size', 'rozmer', 'cislo', 'velkosti', 'sizes', 'ml', 'gram', 'kg', 'liter'],
-  'farba': ['color', 'colour', 'odtien', 'farby', 'farebny'],
-  'doprava': ['dorucenie', 'shipping', 'delivery', 'postovne', 'zasielka', 'kurier'],
-  // Drogéria špecifické synonymá
-  'drogeria': ['kozmetika', 'hygena', 'cistitace', 'mydlo', 'sampon', 'krem', 'drogerie'],
-  'cistenie': ['cistit', 'upratovanie', 'upratovat', 'cistitace', 'dezinfekcia', 'umyvanie'],
-  'pranie': ['prat', 'pracie', 'prasok', 'gel', 'avivaž', 'avivaz', 'pradlo'],
-  'kozmetika': ['makeup', 'krem', 'plet', 'tvar', 'oci', 'pery', 'ruz', 'maskara'],
-  'vlasy': ['sampon', 'kondicioner', 'lak', 'gel', 'farba', 'farbenie'],
-  'telo': ['sprchovy', 'telove', 'mleko', 'olej', 'hydratacia', 'starostlivost'],
-  'zuby': ['zubna', 'pasta', 'kefka', 'ustna', 'voda', 'nit'],
-  'parfem': ['parfum', 'vona', 'deodorant', 'antiperspirant', 'toaletna'],
-  'deti': ['detsky', 'baby', 'dieta', 'kojenec', 'plienky', 'puder'],
-  'domacnost': ['wc', 'kuchyna', 'podlaha', 'okna', 'sklo', 'nabytok']
-};
+// Systémový prompt pre konverzačného asistenta
+const SYSTEM_PROMPT = `Si priateľský a profesionálny asistent online drogérie Drogéria Domov (drogeriadomov.sk).
 
-const INTENT_PATTERNS = {
-  'count_query': ['kolko', 'pocet', 'celkom', 'vsetky', 'vsetko', 'vsetkych', 'kolko mate'],
-  'price_query': ['cena', 'kolko stoji', 'za kolko', 'cennik', 'price'],
-  'availability_query': ['skladom', 'dostupny', 'dostupne', 'mame', 'je k dispozicii'],
-  'category_query': ['kategoria', 'kategorie', 'druhy', 'typy', 'sortiment', 'ponuka'],
-  'discount_query': ['zlava', 'akcia', 'zlacnene', 'vypredaj', 'promo'],
-  'recommendation_query': ['odporuc', 'porad', 'navrhni', 'najlepsie', 'top', 'popularny', 'co mi'],
-  'cleaning_query': ['cistenie', 'upratovanie', 'umyvanie', 'dezinfekcia'],
-  'cosmetics_query': ['kozmetika', 'makeup', 'krem', 'plet', 'vlasy', 'sampon']
-};
+TVOJE HLAVNÉ CIELE:
+1. PORADENSTVO - Pomáhaj zákazníkom nájsť presne to, čo potrebujú
+2. DIALÓG - Pýtaj sa doplňujúce otázky pre lepšie pochopenie potrieb
+3. ODPORÚČANIA - Odporúčaj konkrétne produkty (max 3-5), nie celé zoznamy
+
+PRAVIDLÁ KOMUNIKÁCIE:
+- Keď zákazník povie len všeobecnú kategóriu (napr. "šampón"), OPÝTAJ SA:
+  * Na aký typ vlasov? (suché, mastné, normálne, farbené)
+  * Máte obľúbenú značku?
+  * Preferujete niečo konkrétne? (proti lupinám, pre objem, atď.)
+  
+- Keď zákazník hľadá darček, OPÝTAJ SA:
+  * Pre koho je darček? (muž/žena/dieťa)
+  * Aký máte rozpočet?
+  * Preferujete kozmetiku, parfumy, alebo praktické veci?
+
+- Pri konkrétnych požiadavkách PONÚKNI 3-5 najlepších možností
+
+FORMÁT PRODUKTOV:
+Keď odporúčaš produkt, použi tento formát:
+**[Názov produktu]** - [Cena] €
+[Krátky popis prečo je vhodný]
+[Odkaz na produkt]
+
+DÔLEŽITÉ:
+- Odpovedaj VŽDY po slovensky
+- Buď stručný ale priateľský
+- Ak nemáš presné info, radšej sa opýtaj
+- Nikdy nevymýšľaj produkty - používaj len tie z kontextu
+- Ak nie sú v kontexte relevantné produkty, povedz to a navrhni alternatívy`;
 
 export default async function handler(req, res) {
-  const API_KEY = process.env.API_KEY;
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
+  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { messages, ragContext = '' } = req.body;
+  const { message, history = [] } = req.body;
+  
+  if (!message || typeof message !== 'string') {
+    return res.status(400).json({ error: 'Message is required' });
+  }
+
+  if (!DEEPSEEK_API_KEY) {
+    return res.status(500).json({ error: 'DeepSeek API not configured' });
+  }
 
   try {
-    let enhancedMessages = [...messages];
-    const lastUserMessage = getLastUserMessage(messages);
+    // Analyzuj zámer používateľa
+    const intent = analyzeIntent(message);
+    console.log(`💬 Správa: "${message}" | Zámer: ${intent.type}`);
     
-    // RAG: Vyhľadaj relevantné produkty z Redis
-    const ragResult = await processWithRAG(lastUserMessage);
-    console.log('🧠 RAG Result:', {
-      intent: ragResult.intent,
-      matchedProducts: ragResult.products.length,
-      topScore: ragResult.products[0]?.score || 0
-    });
+    // Získaj kontext na základe zámeru
+    const context = await buildContext(message, intent);
     
-    // Vytvor kontext pre AI
-    let productContext = ragResult.context;
+    // Vytvor správy pre AI
+    const messages = buildMessages(message, history, context, intent);
     
-    // Kombinuj s existujúcim RAG kontextom
-    let combinedContext = productContext;
-    if (ragContext) {
-      combinedContext += `\n\nĎALŠIE INFORMÁCIE:\n${ragContext}`;
-    }
-    
-    // Vlož kontext pred poslednú user správu
-    if (combinedContext) {
-      let lastUserIndex = -1;
-      for (let i = enhancedMessages.length - 1; i >= 0; i--) {
-        if (enhancedMessages[i]?.role === 'user') {
-          lastUserIndex = i;
-          break;
-        }
-      }
-
-      if (lastUserIndex !== -1) {
-        enhancedMessages.splice(lastUserIndex, 0, {
-          role: 'system',
-          content: `DÔLEŽITÉ - Použi PRESNE tieto informácie o produktoch:\n\n${combinedContext}\n\nPRAVIDLÁ:\n- Uvádzaj IBA ceny z tohto kontextu\n- Pri každom produkte uveď presnú cenu a dostupnosť\n- Ak produkt nie je v zozname, povedz že ho nemáme alebo ho nevieme nájsť\n- Nedomýšľaj si ceny ani produkty\n- Odpovedaj v slovenčine`
-        });
-      }
-    }
-
-    console.log(`📤 Sending ${enhancedMessages.length} messages to API`);
-
-    const response = await fetch("https://api.deepseek.com/chat/completions", {
-      method: "POST",
+    // Zavolaj DeepSeek API
+    const response = await fetch(DEEPSEEK_API_URL, {
+      method: 'POST',
       headers: {
-        Authorization: `Bearer ${API_KEY}`,
-        "Content-Type": "application/json"
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
       },
       body: JSON.stringify({
-        model: "deepseek-chat",
-        messages: enhancedMessages,
-        temperature: 0.3,
-        max_tokens: 1000,
-        stream: false
+        model: 'deepseek-chat',
+        messages: messages,
+        temperature: 0.7,
+        max_tokens: 1000
       })
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`API responded with status ${response.status}: ${errorText}`);
+      const error = await response.text();
+      console.error('DeepSeek error:', error);
+      throw new Error('AI service error');
     }
 
     const data = await response.json();
-    
-    // Debug info
-    data._debug = {
-      intent: ragResult.intent,
-      matchedProducts: ragResult.products.length,
-      topProducts: ragResult.products.slice(0, 3).map(p => ({ title: p.title, score: p.score })),
-      contextLength: combinedContext?.length || 0
-    };
-    
-    res.status(200).json(data);
+    const reply = data.choices[0]?.message?.content || 'Prepáčte, nastala chyba.';
+
+    return res.status(200).json({
+      reply: reply,
+      intent: intent.type,
+      productsFound: context.products?.length || 0
+    });
+
   } catch (error) {
-    console.error("API Error:", error);
-    res.status(500).json({ error: "Internal Server Error", details: error.message });
+    console.error('Chat error:', error);
+    return res.status(500).json({ 
+      error: 'Nastala chyba pri spracovaní',
+      reply: 'Prepáčte, momentálne mám technické problémy. Skúste to prosím znovu.'
+    });
   }
 }
 
-// Získanie poslednej user správy
-function getLastUserMessage(messages) {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i]?.role === 'user') {
-      return messages[i].content;
-    }
-  }
-  return '';
-}
-
-// RAG spracovanie s Redis
-async function processWithRAG(query) {
-  console.log('🧠 RAG processing query:', query);
+// Analýza zámeru používateľa
+function analyzeIntent(message) {
+  const lower = message.toLowerCase();
   
-  try {
-    // Získaj metadáta
-    const metadata = await getProductsMetadata();
-    console.log(`📊 Products in database: ${metadata.count}, Last update: ${metadata.lastUpdate}`);
-    
-    if (!metadata.count || metadata.count === 0) {
-      return { 
-        intent: null, 
-        products: [], 
-        context: '⚠️ Produktová databáza je prázdna. Prosím, spustite sync.' 
-      };
-    }
-
-    // Detekuj intent
-    const intent = detectIntent(query);
-    console.log('🎯 Detected intent:', intent);
-
-    // Vyhľadaj produkty pomocou inverzného indexu
-    const products = await searchProducts(query, 15);
-    console.log('📊 Found products:', products.length);
-
-    // Vytvor kontext podľa intentu
-    const context = await buildContext(intent, products, metadata, query);
-
-    return {
-      intent,
-      products,
-      context
-    };
-  } catch (error) {
-    console.error('RAG Error:', error);
-    return { intent: null, products: [], context: '' };
+  // Pozdrav
+  if (/^(ahoj|dobrý|čau|zdravím|hey|hi|nazdar)/i.test(lower)) {
+    return { type: 'greeting' };
   }
-}
-
-// Detekcia intentu
-function detectIntent(query) {
-  const normalized = normalizeText(query);
   
-  for (const [intent, patterns] of Object.entries(INTENT_PATTERNS)) {
-    if (patterns.some(p => normalized.includes(p))) {
-      return intent;
+  // Zľavy/akcie
+  if (/zlav|akci|výpredaj|lacn|znížen|promo/i.test(lower)) {
+    return { type: 'discounts' };
+  }
+  
+  // Kategórie
+  if (/kategór|sortiment|ponuk|máte|čo predávate/i.test(lower)) {
+    return { type: 'categories' };
+  }
+  
+  // Značky
+  if (/značk|brand|výrobc/i.test(lower)) {
+    return { type: 'brands' };
+  }
+  
+  // Darček
+  if (/darček|darovať|pre .*(mamu|otca|priateľ|manžel|dieťa|babičk)/i.test(lower)) {
+    return { type: 'gift', needsMore: true };
+  }
+  
+  // Všeobecné kategórie - potrebujú spresnenie
+  const generalCategories = [
+    'šampón', 'mydlo', 'krém', 'parfém', 'dezodorant', 'zubná', 
+    'prací', 'čistiaci', 'kozmetik', 'makeup', 'rúž'
+  ];
+  
+  for (const cat of generalCategories) {
+    if (lower.includes(cat) && lower.split(' ').length < 5) {
+      return { type: 'general_category', category: cat, needsMore: true };
     }
   }
-  return 'general_query';
+  
+  // Konkrétne vyhľadávanie
+  if (lower.split(' ').length >= 2) {
+    return { type: 'specific_search' };
+  }
+  
+  return { type: 'general' };
 }
 
 // Vytvorenie kontextu pre AI
-async function buildContext(intent, products, metadata, query) {
-  let context = `📊 E-SHOP ŠTATISTIKY:\n`;
-  context += `- Celkom produktov v databáze: ${metadata.count}\n`;
-  context += `- Posledná aktualizácia: ${metadata.lastUpdate}\n\n`;
-
-  // Pre kategórie - zobraz dostupné kategórie
-  if (intent === 'category_query') {
-    try {
-      const categories = await getAllCategories();
-      context += `📁 DOSTUPNÉ KATEGÓRIE:\n`;
-      categories.slice(0, 20).forEach(cat => {
-        context += `- ${cat.name} (${cat.count} produktov)\n`;
-      });
-      context += `\n`;
-    } catch (e) {
-      console.warn('Could not fetch categories:', e);
+async function buildContext(message, intent) {
+  const context = {
+    products: [],
+    categories: [],
+    brands: [],
+    stats: null
+  };
+  
+  try {
+    switch (intent.type) {
+      case 'greeting':
+        context.stats = await getStats();
+        break;
+        
+      case 'discounts':
+        context.products = await getDiscountedProducts(5);
+        break;
+        
+      case 'categories':
+        context.categories = await getCategories();
+        break;
+        
+      case 'brands':
+        context.brands = await getBrands();
+        break;
+        
+      case 'general_category':
+      case 'specific_search':
+      case 'general':
+      default:
+        const result = await searchProducts(message, { limit: 5 });
+        context.products = result.products;
+        context.searchInfo = {
+          total: result.total,
+          matchedTerms: result.matchedTerms
+        };
+        break;
     }
+  } catch (error) {
+    console.error('Context build error:', error);
   }
-
-  // Zobraz nájdené produkty
-  if (products.length > 0) {
-    context += `🎯 NÁJDENÉ PRODUKTY (zoradené podľa relevancie):\n\n`;
-    
-    products.forEach((product, index) => {
-      context += `${index + 1}. **${product.title}**`;
-      if (product.score > 0) {
-        context += ` [skóre: ${product.score}]`;
-      }
-      context += `\n`;
-      
-      // Cena
-      if (product.has_discount && product.sale_price) {
-        context += `   💰 Cena: €${product.sale_price.toFixed(2)} (pôvodne €${product.price.toFixed(2)}, zľava ${product.discount_percentage}%)\n`;
-      } else {
-        context += `   💰 Cena: €${product.price.toFixed(2)}\n`;
-      }
-      
-      // Dostupnosť
-      context += `   📦 Dostupnosť: ${product.available ? '✅ SKLADOM' : '❌ NEDOSTUPNÉ'}`;
-      if (product.stock_quantity > 0) {
-        context += ` (${product.stock_quantity} ks)`;
-      }
-      context += `\n`;
-      
-      // Kategória a značka
-      if (product.category) {
-        context += `   📁 Kategória: ${product.category}\n`;
-      }
-      if (product.brand) {
-        context += `   🏷️ Značka: ${product.brand}\n`;
-      }
-      
-      // Popis (skrátený)
-      if (product.description) {
-        const shortDesc = product.description.substring(0, 150);
-        context += `   📝 ${shortDesc}${product.description.length > 150 ? '...' : ''}\n`;
-      }
-      
-      // URL
-      if (product.url) {
-        context += `   🔗 ${product.url}\n`;
-      }
-      
-      context += `\n`;
-    });
-  } else {
-    context += `❌ Pre dotaz "${query}" neboli nájdené žiadne produkty.\n`;
-    context += `Skúste upraviť vyhľadávacie slová alebo sa opýtať na kategóriu.\n`;
-  }
-
+  
   return context;
 }
 
-// Normalizácia textu
-function normalizeText(text) {
-  return (text || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\w\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+// Vytvorenie správ pre AI
+function buildMessages(message, history, context, intent) {
+  const messages = [
+    { role: 'system', content: SYSTEM_PROMPT }
+  ];
+  
+  // Pridaj kontext
+  let contextMessage = '';
+  
+  if (context.stats) {
+    contextMessage = `INFORMÁCIE O OBCHODE:
+- Počet produktov: ${context.stats.productCount}
+- Hlavné kategórie: ${context.stats.topCategories.map(c => c.name).join(', ')}
+- Top značky: ${context.stats.topBrands.map(b => b.name).join(', ')}`;
+  }
+  
+  if (context.products && context.products.length > 0) {
+    contextMessage = `NÁJDENÉ PRODUKTY (${context.products.length} z ${context.searchInfo?.total || '?'}):
+
+${context.products.map((p, i) => `${i + 1}. **${p.title}**
+   Značka: ${p.brand || 'neuvedená'}
+   Kategória: ${p.categoryMain}
+   Cena: ${p.salePrice ? `~~${p.price}€~~ **${p.salePrice}€** (-${p.discountPercent}%)` : `${p.price}€`}
+   ${p.description ? `Popis: ${p.description.substring(0, 100)}...` : ''}
+   URL: ${p.url}`).join('\n\n')}`;
+  }
+  
+  if (context.categories && context.categories.length > 0) {
+    contextMessage = `KATEGÓRIE V OBCHODE:
+${context.categories.slice(0, 10).map(c => `- ${c.name} (${c.count} produktov)`).join('\n')}`;
+  }
+  
+  if (context.brands && context.brands.length > 0) {
+    contextMessage = `ZNAČKY V OBCHODE:
+${context.brands.slice(0, 15).map(b => `- ${b.name} (${b.count} produktov)`).join('\n')}`;
+  }
+  
+  if (contextMessage) {
+    messages.push({
+      role: 'system',
+      content: `KONTEXT PRE TÚTO ODPOVEĎ:\n${contextMessage}\n\n${intent.needsMore ? 'POZNÁMKA: Zákazník má všeobecnú požiadavku. Opýtaj sa na spresnenie pred odporúčaním produktov.' : ''}`
+    });
+  }
+  
+  // Pridaj históriu (max posledných 6 správ)
+  const recentHistory = history.slice(-6);
+  for (const msg of recentHistory) {
+    messages.push({
+      role: msg.role === 'user' ? 'user' : 'assistant',
+      content: msg.content
+    });
+  }
+  
+  // Pridaj aktuálnu správu
+  messages.push({ role: 'user', content: message });
+  
+  return messages;
 }
