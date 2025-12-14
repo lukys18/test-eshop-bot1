@@ -29,16 +29,16 @@ PRAVIDLÁ KOMUNIKÁCIE:
 - Pri konkrétnych požiadavkách PONÚKNI 3-5 najlepších možností
 
 FORMÁT PRODUKTOV:
-Keď odporúčaš produkt, použi tento formát:
+Keď odporúčaš produkt, použi PRESNE tento formát:
 **[Názov produktu]** - [Cena] €
 [Krátky popis prečo je vhodný]
-[Odkaz na produkt]
+Odkaz: [URL z kontextu - skopíruj PRESNE ako je uvedený]
 
 DÔLEŽITÉ:
 - Odpovedaj VŽDY po slovensky
 - Buď stručný ale priateľský
-- Ak nemáš presné info, radšej sa opýtaj
-- Nikdy nevymýšľaj produkty - používaj len tie z kontextu
+- Pri odkazoch na produkty VŽDY použi PRESNÝ odkaz z kontextu (začína https://www.drogeriadomov.sk/)
+- Nikdy nevymýšľaj produkty ani odkazy - používaj len tie z kontextu
 - Ak nie sú v kontexte relevantné produkty, povedz to a navrhni alternatívy`;
 
 export default async function handler(req, res) {

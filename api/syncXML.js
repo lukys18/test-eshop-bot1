@@ -136,8 +136,18 @@ function transformProduct(raw) {
   
   const brand = decodeHtmlEntities(raw['g:brand'] || '');
   const available = String(raw['g:availability'] || '').toLowerCase().includes('in stock');
-  const image = raw['g:image_link'] || null;
-  const url = raw['g:link'] || null;
+  
+  // Správne extrahuj URL - môže byť objekt alebo string
+  let image = raw['g:image_link'];
+  if (typeof image === 'object' && image !== null) {
+    image = image._ || image['#text'] || String(image);
+  }
+  
+  let url = raw['g:link'];
+  if (typeof url === 'object' && url !== null) {
+    url = url._ || url['#text'] || String(url);
+  }
+  url = url ? String(url).trim() : null;
 
   return {
     id: String(id),
