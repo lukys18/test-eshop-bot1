@@ -79,6 +79,14 @@ export async function searchProducts(query, options = {}) {
     return { products: [], total: 0, query };
   }
   
+  // Detekcia cieľovej skupiny v dotaze
+  const queryLower = normalizedQuery;
+  const forWomen = /(\bpre zeny\b|\bzeny\b|\bzena\b|\bzensky\b|\bdamsk)/i.test(queryLower);
+  const forMen = /(\bpre muzov\b|\bmuzov\b|\bmuz\b|\bmuzsky\b|\bpansk)/i.test(queryLower);
+  const forKids = /(\bpre deti\b|\bdeti\b|\bdetsk|\bdieta\b|\bbaby\b)/i.test(queryLower);
+  
+  console.log('👥 Cieľová skupina:', { forWomen, forMen, forKids });
+  
   // Bodovanie produktov
   const scored = [];
   
@@ -90,6 +98,16 @@ export async function searchProducts(query, options = {}) {
     const searchText = product.searchText || normalize(`${product.title} ${product.brand} ${product.description} ${product.category}`);
     const titleNorm = normalize(product.title);
     const brandNorm = normalize(product.brand || '');
+    
+    // Detekcia cieľovej skupiny produktu
+    const productForMen = /pre muzov|muzsky|men|man/.test(titleNorm);
+    const productForWomen = /pre zeny|zensky|women|woman|girl/.test(titleNorm);
+    const productForKids = /pre deti|detsk|kids|baby|dieta/.test(titleNorm);
+    
+    // Penalizácia za nezhodu cieľovej skupiny
+    if (forWomen && productForMen) continue; // Úplne preskočiť produkty pre mužov
+    if (forMen && productForWomen) continue; // Úplne preskočiť produkty pre ženy
+    if (forKids && !productForKids && (productForMen || productForWomen)) continue;
     
     for (const term of queryTerms) {
       // Presná zhoda v title = 10 bodov
@@ -109,6 +127,11 @@ export async function searchProducts(query, options = {}) {
         score += 3;
       }
     }
+    
+    // Bonus za zhodu cieľovej skupiny
+    if (forWomen && productForWomen) score += 15;
+    if (forMen && productForMen) score += 15;
+    if (forKids && productForKids) score += 15;
     
     // Bonus za zľavu
     if (product.hasDiscount) {
