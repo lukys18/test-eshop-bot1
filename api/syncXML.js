@@ -119,11 +119,22 @@ export default async function handler(req, res) {
     await redis.del('products:all');
     await redis.del('products:count');
     await redis.del('products:lastUpdate');
+    await redis.del('categories:tree');
+    await redis.del('categories:list');
     
     // Ulož všetky produkty ako jeden JSON array
     await redis.set('products:all', JSON.stringify(products));
     await redis.set('products:count', products.length);
     await redis.set('products:lastUpdate', new Date().toISOString());
+    
+    // Extrahuj a ulož kategórie
+    const categoryTree = buildCategoryTree(products);
+    const categoryList = extractCategoryList(categoryTree);
+    
+    await redis.set('categories:tree', JSON.stringify(categoryTree));
+    await redis.set('categories:list', JSON.stringify(categoryList));
+    
+    console.log(`📂 Extrahovaných ${Object.keys(categoryTree).length} hlavných kategórií`);
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`✅ Sync hotový za ${duration}s - ${products.length} produktov`);
@@ -131,9 +142,11 @@ export default async function handler(req, res) {
     return res.status(200).json({
       success: true,
       message: `Synced ${products.length} products`,
+      categories: Object.keys(categoryTree).length,
       timestamp: new Date().toISOString(),
       duration: `${duration}s`,
-      sample: products.slice(0, 2)
+      sample: products.slice(0, 2),
+      sampleCategories: categoryList.slice(0, 10)
     });
 
   } catch (error) {
@@ -192,4 +205,89 @@ function normalize(text) {
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+// Vytvor strom kategórií z produktov
+function buildCategoryTree(products) {
+  const tree = {};
+  
+  for (const product of products) {
+    if (!product.categoryPath || product.categoryPath.length === 0) continue;
+    
+    const path = product.categoryPath;
+    const mainCat = path[0];
+    
+    if (!tree[mainCat]) {
+      tree[mainCat] = {
+        name: mainCat,
+        count: 0,
+        subcategories: {}
+      };
+    }
+    tree[mainCat].count++;
+    
+    // Pridaj podkategórie
+    if (path.length >= 2) {
+      const subCat = path[1];
+      if (!tree[mainCat].subcategories[subCat]) {
+        tree[mainCat].subcategories[subCat] = {
+          name: subCat,
+          count: 0,
+          subcategories: {}
+        };
+      }
+      tree[mainCat].subcategories[subCat].count++;
+      
+      // Pridaj 3. úroveň
+      if (path.length >= 3) {
+        const subSubCat = path[2];
+        if (!tree[mainCat].subcategories[subCat].subcategories[subSubCat]) {
+          tree[mainCat].subcategories[subCat].subcategories[subSubCat] = {
+            name: subSubCat,
+            count: 0
+          };
+        }
+        tree[mainCat].subcategories[subCat].subcategories[subSubCat].count++;
+      }
+    }
+  }
+  
+  return tree;
+}
+
+// Extrahuj plochý zoznam kategórií pre AI
+function extractCategoryList(tree) {
+  const list = [];
+  
+  for (const [mainName, main] of Object.entries(tree)) {
+    list.push({
+      level: 1,
+      name: mainName,
+      path: mainName,
+      count: main.count
+    });
+    
+    for (const [subName, sub] of Object.entries(main.subcategories || {})) {
+      list.push({
+        level: 2,
+        name: subName,
+        path: `${mainName} > ${subName}`,
+        count: sub.count
+      });
+      
+      for (const [subSubName, subSub] of Object.entries(sub.subcategories || {})) {
+        list.push({
+          level: 3,
+          name: subSubName,
+          path: `${mainName} > ${subName} > ${subSubName}`,
+          count: subSub.count
+        });
+      }
+    }
+  }
+  
+  // Zoraď podľa počtu produktov
+  list.sort((a, b) => b.count - a.count);
+  
+  return list;
 }

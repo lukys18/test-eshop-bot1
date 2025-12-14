@@ -2,7 +2,7 @@
 // Konverzačný AI asistent pre Drogériu Domov
 // Optimalizovaný pre poradenstvo a cielené odporúčania
 
-import { searchProducts, getCategories, getBrands, getStats, getDiscountedProducts } from '../redisClient.js';
+import { searchProducts, getCategories, getCategoriesForPrompt, getBrands, getStats, getDiscountedProducts } from '../redisClient.js';
 
 const DEEPSEEK_API_KEY = process.env.API_KEY;
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
@@ -79,19 +79,21 @@ function enhanceQueryFromHistory(message, history, intent) {
 }
 
 // Systémový prompt pre konverzačného asistenta
-const SYSTEM_PROMPT = `Si priateľský asistent online drogérie Drogéria Domov (drogeriadomov.sk).
+const SYSTEM_PROMPT_BASE = `Si priateľský asistent online drogérie Drogéria Domov (drogeriadomov.sk).
 
 KRITICKÉ PRAVIDLÁ:
 1. Môžeš odporúčať IBA produkty, ktoré sú uvedené v sekcii "NÁJDENÉ PRODUKTY" v kontexte.
 2. Ak tam nie sú žiadne produkty, NIKDY si ich nevymýšľaj - namiesto toho sa opýtaj zákazníka na spresnenie.
 3. Zdraviť (ahoj, dobrý deň) môžeš LEN na prvú správu v konverzácii. Potom už pozdrav vynechaj.
 4. NEPÍŠ URL odkazy - produkty sa zobrazia automaticky ako klikateľné kartičky pod tvojou odpoveďou.
+5. ODPORÚČAJ LEN KATEGÓRIE Z POSKYTNUTÉHO ZOZNAMU - nevymýšľaj si vlastné kategórie!
 
 TVOJE ÚLOHY:
 1. Pomáhaj zákazníkom nájsť produkty z ponuky
 2. Pýtaj sa doplňujúce otázky ak je požiadavka príliš všeobecná
 3. Odporúčaj max 3-5 produktov z kontextu
-4. Ak zákazník len poďakuje alebo sa lúči, odpovedz stručne a prívetivo
+4. Pri odporúčaní kategórií používaj LEN tie zo zoznamu "DOSTUPNÉ KATEGÓRIE"
+5. Ak zákazník len poďakuje alebo sa lúči, odpovedz stručne a prívetivo
 
 FORMÁT ODPOVEDE (ak máš produkty v kontexte):
 - Stručne povedz čo si našiel (napr. "Našla som pre vás tieto produkty na umývanie riadu:")
@@ -102,6 +104,7 @@ AK NEMÁŠ PRODUKTY V KONTEXTE A ZÁKAZNÍK SA PÝTA NA PRODUKT:
 - Povedz zákazníkovi, že pre lepšie výsledky potrebuješ viac informácií
 - Opýtaj sa na značku, typ produktu, alebo účel použitia
 - NEVYMÝŠĽAJ žiadne produkty ani značky
+- Pri odporúčaní kategórií používaj LEN tie z "DOSTUPNÉ KATEGÓRIE"
 
 AK ZÁKAZNÍK NEPÝTA NA PRODUKTY (ďakuje, zdraví, všeobecná otázka):
 - Odpovedz prirodzene a stručne
@@ -361,10 +364,19 @@ async function buildContext(message, intent) {
     categories: [],
     brands: [],
     stats: null,
-    searchInfo: null
+    searchInfo: null,
+    categoriesPrompt: null  // Pre dynamický system prompt
   };
   
   console.log('🏗️ Budujem kontext pre zámer:', intent.type);
+  
+  // Vždy načítaj kategórie pre system prompt (AI potrebuje vedieť čo eshop ponúka)
+  try {
+    context.categoriesPrompt = await getCategoriesForPrompt();
+    console.log('📂 Kategórie načítané pre prompt');
+  } catch (e) {
+    console.log('⚠️ Nepodarilo sa načítať kategórie:', e.message);
+  }
   
   try {
     switch (intent.type) {
@@ -463,8 +475,16 @@ async function buildContext(message, intent) {
 
 // Vytvorenie správ pre AI
 function buildMessages(message, history, context, intent) {
+  // Vytvor dynamický system prompt s kategóriami
+  let systemPrompt = SYSTEM_PROMPT_BASE;
+  
+  // Pridaj kategórie do system promptu ak sú dostupné
+  if (context.categoriesPrompt) {
+    systemPrompt += `\n\n${context.categoriesPrompt}`;
+  }
+  
   const messages = [
-    { role: 'system', content: SYSTEM_PROMPT }
+    { role: 'system', content: systemPrompt }
   ];
   
   // Pridaj kontext

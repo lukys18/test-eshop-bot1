@@ -199,8 +199,19 @@ export async function getDiscountedProducts(limit = 5) {
   return discounted;
 }
 
-// Získanie kategórií
+// Získanie kategórií (z Redis cache)
 export async function getCategories() {
+  const redis = getRedisClient();
+  
+  // Skús načítať z Redis (vytvorené pri sync)
+  const cachedList = await redis.get('categories:list');
+  if (cachedList) {
+    const list = typeof cachedList === 'string' ? JSON.parse(cachedList) : cachedList;
+    console.log(`📂 Načítaných ${list.length} kategórií z cache`);
+    return list;
+  }
+  
+  // Fallback - extrahuj z produktov
   const products = await getAllProducts();
   
   const categoryCount = {};
@@ -210,8 +221,50 @@ export async function getCategories() {
   }
   
   return Object.entries(categoryCount)
-    .map(([name, count]) => ({ name, count }))
+    .map(([name, count]) => ({ level: 1, name, path: name, count }))
     .sort((a, b) => b.count - a.count);
+}
+
+// Získanie stromu kategórií
+export async function getCategoryTree() {
+  const redis = getRedisClient();
+  
+  const cached = await redis.get('categories:tree');
+  if (cached) {
+    return typeof cached === 'string' ? JSON.parse(cached) : cached;
+  }
+  
+  return null;
+}
+
+// Formátuj kategórie pre AI prompt
+export async function getCategoriesForPrompt() {
+  const categories = await getCategories();
+  
+  if (!categories || categories.length === 0) {
+    return 'Kategórie nie sú dostupné.';
+  }
+  
+  // Zoskup podľa hlavnej kategórie
+  const mainCategories = categories.filter(c => c.level === 1);
+  const subCategories = categories.filter(c => c.level === 2);
+  
+  let prompt = 'DOSTUPNÉ KATEGÓRIE V ESHOPE:\n';
+  
+  for (const main of mainCategories.slice(0, 15)) {
+    prompt += `\n📁 ${main.name} (${main.count} produktov)\n`;
+    
+    // Pridaj podkategórie
+    const subs = subCategories
+      .filter(s => s.path.startsWith(main.name + ' > '))
+      .slice(0, 5);
+    
+    for (const sub of subs) {
+      prompt += `   - ${sub.name} (${sub.count})\n`;
+    }
+  }
+  
+  return prompt;
 }
 
 // Získanie značiek
