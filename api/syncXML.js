@@ -70,7 +70,12 @@ export default async function handler(req, res) {
         parseFloat(String(salePriceStr).replace(/[^\d.,]/g, '').replace(',', '.')) : null;
 
       const categoryFull = decodeHtml(raw['g:product_type'] || raw['g:google_product_category'] || '');
-      const categoryParts = categoryFull.split('|').map(s => s.trim()).filter(Boolean);
+      let categoryParts = categoryFull.split('|').map(s => s.trim()).filter(Boolean);
+      
+      // Preskočiť "Heureka.sk" ako kategóriu
+      if (categoryParts[0] === 'Heureka.sk') {
+        categoryParts = categoryParts.slice(1);
+      }
       
       const brand = decodeHtml(raw['g:brand'] || '');
       const available = String(raw['g:availability'] || '').toLowerCase().includes('in stock');
@@ -140,6 +145,7 @@ export default async function handler(req, res) {
 function decodeHtml(text) {
   if (!text) return '';
   return String(text)
+    // Základné HTML entity
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -147,6 +153,32 @@ function decodeHtml(text) {
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
     .replace(/&nbsp;/g, ' ')
+    // Slovenské znaky
+    .replace(/&aacute;/g, 'á')
+    .replace(/&Aacute;/g, 'Á')
+    .replace(/&eacute;/g, 'é')
+    .replace(/&Eacute;/g, 'É')
+    .replace(/&iacute;/g, 'í')
+    .replace(/&Iacute;/g, 'Í')
+    .replace(/&oacute;/g, 'ó')
+    .replace(/&Oacute;/g, 'Ó')
+    .replace(/&uacute;/g, 'ú')
+    .replace(/&Uacute;/g, 'Ú')
+    .replace(/&yacute;/g, 'ý')
+    .replace(/&Yacute;/g, 'Ý')
+    .replace(/&scaron;/g, 'š')
+    .replace(/&Scaron;/g, 'Š')
+    .replace(/&ccaron;/g, 'č')
+    .replace(/&Ccaron;/g, 'Č')
+    .replace(/&zcaron;/g, 'ž')
+    .replace(/&Zcaron;/g, 'Ž')
+    .replace(/&ncaron;/g, 'ň')
+    .replace(/&rcaron;/g, 'ŕ')
+    .replace(/&lcaron;/g, 'ľ')
+    .replace(/&tcaron;/g, 'ť')
+    .replace(/&dcaron;/g, 'ď')
+    .replace(/&ocircumflex;/g, 'ô')
+    // Odstráň HTML tagy
     .replace(/<[^>]*>/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
