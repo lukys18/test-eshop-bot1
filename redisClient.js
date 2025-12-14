@@ -149,6 +149,9 @@ export async function searchProducts(query, options = {}) {
     } else if (fuzzyMatch && term.length >= 3) {
       // Fuzzy matching - hľadaj slová ktoré obsahujú term alebo term obsahuje ich
       for (const indexWord of allIndexWords) {
+        // Bezpečnostná kontrola - musí byť string
+        if (typeof indexWord !== 'string') continue;
+        
         if (indexWord.includes(term) || term.includes(indexWord)) {
           const fuzzyData = await redis.hget('idx:words', indexWord);
           if (fuzzyData) {
@@ -170,6 +173,9 @@ export async function searchProducts(query, options = {}) {
     for (const term of queryTerms) {
       if (term.length >= 2) {
         for (const indexWord of allIndexWords.slice(0, 500)) { // Limit pre rýchlosť
+          // Bezpečnostná kontrola
+          if (typeof indexWord !== 'string') continue;
+          
           if (indexWord.startsWith(term) || term.startsWith(indexWord)) {
             const prefixData = await redis.hget('idx:words', indexWord);
             if (prefixData && !wordIndex[indexWord]) {
