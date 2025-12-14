@@ -33,6 +33,15 @@ function normalize(text) {
     .trim();
 }
 
+// Stopwords - slová ktoré ignorujeme pri vyhľadávaní
+const STOPWORDS = new Set([
+  'pre', 'na', 'do', 'za', 'po', 'od', 'up', 'in', 'on', 'to', 'the', 'and', 'or',
+  'som', 'je', 'su', 'ma', 'mi', 'si', 'sa', 'by', 'uz', 'aj', 'no', 'ak', 'ci',
+  'hladam', 'potrebujem', 'chcem', 'daj', 'ukazte', 'chcela', 'chcel',
+  'nejake', 'nejaky', 'niektore', 'vsetko', 'viac', 'menej',
+  'prosim', 'dakujem', 'ahoj', 'dobry', 'den'
+]);
+
 // Načítaj všetky produkty (s cache)
 async function getAllProducts() {
   const now = Date.now();
@@ -69,15 +78,27 @@ export async function searchProducts(query, options = {}) {
     return { products: [], total: 0, query };
   }
   
+  // Expanduj synonymá a spojené slová
+  let expandedQuery = query
+    .replace(/make\s*up/gi, 'makeup licenie dekorativna kozmetika')
+    .replace(/ruz\b/gi, 'ruz pery')
+    .replace(/oci|tiena/gi, 'oci tiena ocne')
+    .replace(/riasenka/gi, 'riasenka mascara oci');
+  
   // Normalizuj query
-  const normalizedQuery = normalize(query);
-  const queryTerms = normalizedQuery.split(/\s+/).filter(w => w.length >= 2);
+  const normalizedQuery = normalize(expandedQuery);
+  const queryTerms = normalizedQuery
+    .split(/\s+/)
+    .filter(w => w.length >= 2 && !STOPWORDS.has(w));
   
   console.log('🔤 Hľadané termy:', queryTerms);
   
   if (queryTerms.length === 0) {
     return { products: [], total: 0, query };
   }
+  
+  // Minimálne skóre = počet termov * 3 (aspoň každý term musí mať 1 zhodu)
+  const minScore = queryTerms.length * 3;
   
   // Detekcia cieľovej skupiny v dotaze
   const queryLower = normalizedQuery;
@@ -138,7 +159,8 @@ export async function searchProducts(query, options = {}) {
       score += 1;
     }
     
-    if (score > 0) {
+    // Pridaj len ak má dostatočné skóre
+    if (score >= minScore) {
       scored.push({ product, score });
     }
   }
@@ -152,7 +174,7 @@ export async function searchProducts(query, options = {}) {
     _score: s.score
   }));
   
-  console.log(`✅ Nájdených ${scored.length} produktov, vrátených ${results.length}`);
+  console.log(`✅ Nájdených ${scored.length} produktov (min skóre: ${minScore}), vrátených ${results.length}`);
   if (results.length > 0) {
     console.log('📋 Top výsledky:', results.slice(0, 3).map(p => `${p.title} (${p._score})`));
   }
