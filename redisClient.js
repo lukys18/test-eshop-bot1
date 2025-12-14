@@ -78,12 +78,18 @@ export async function searchProducts(query, options = {}) {
     return { products: [], total: 0, query };
   }
   
+  // Detekcia či používateľ hľadá make-up produkty (nie odstránenie)
+  const queryLower = query.toLowerCase();
+  const wantsMakeup = /make\s*-?\s*up|makeup|mejkap|mejk[\s-]?ap/i.test(queryLower) && 
+                      !/odstrán|odstran|čist|cist|micel|demak|zmyv/i.test(queryLower);
+  
   // Expanduj synonymá a spojené slová
   let expandedQuery = query
-    .replace(/make\s*up/gi, 'makeup licenie dekorativna kozmetika')
-    .replace(/ruz\b/gi, 'ruz pery')
-    .replace(/oci|tiena/gi, 'oci tiena ocne')
-    .replace(/riasenka/gi, 'riasenka mascara oci');
+    .replace(/make\s*-?\s*up|makeup|mejkap|mejk[\s-]?ap/gi, 'makeup licenie dekorativna kozmetika ruz riasenka ocne tiene pery rteny plet tvar tvare podklad korektor mejkap ceruzka konturo')
+    .replace(/ruz\b/gi, 'ruz pery rteny rtenka')
+    .replace(/oci|tiena/gi, 'oci tiena ocne tiene paleta')
+    .replace(/riasenka/gi, 'riasenka mascara oci ocna')
+    .replace(/podklad|make-?up na tvar/gi, 'podklad foundation tvar tvare korektor concealer puder');
   
   // Normalizuj query
   const normalizedQuery = normalize(expandedQuery);
@@ -107,6 +113,7 @@ export async function searchProducts(query, options = {}) {
   const forKids = /(\bpre deti\b|\bdeti\b|\bdetsk|\bdieta\b|\bbaby\b)/i.test(queryLower);
   
   console.log('👥 Cieľová skupina:', { forWomen, forMen, forKids });
+  console.log('💄 Hľadá make-up produkty:', wantsMakeup);
   
   // Bodovanie produktov
   const scored = [];
@@ -119,6 +126,16 @@ export async function searchProducts(query, options = {}) {
     const searchText = product.searchText || normalize(`${product.title} ${product.brand} ${product.description} ${product.category}`);
     const titleNorm = normalize(product.title);
     const brandNorm = normalize(product.brand || '');
+    
+    // Ak hľadá make-up, preskočiť produkty na ODSTRÁNENIE make-upu
+    if (wantsMakeup) {
+      const isRemovalProduct = /odstran|odlicov|demak|micel|cist|umyv|hubka/.test(titleNorm) ||
+                               /odstranuje|odlicuje|cistenie|umyvanie/.test(searchText);
+      if (isRemovalProduct) {
+        console.log(`❌ Preskakujem produkt na odstránenie make-upu: ${product.title}`);
+        continue;
+      }
+    }
     
     // Detekcia cieľovej skupiny produktu
     const productForMen = /pre muzov|muzsky|men|man/.test(titleNorm);
