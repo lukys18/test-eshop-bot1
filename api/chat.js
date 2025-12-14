@@ -140,6 +140,7 @@ export default async function handler(req, res) {
 // Analýza zámeru používateľa
 function analyzeIntent(message) {
   const lower = message.toLowerCase().trim();
+  const normalized = normalizeForSearch(message);
   const words = lower.split(/\s+/).filter(w => w.length >= 2);
   
   console.log('🧠 Analyzujem zámer:', { message: lower, wordCount: words.length });
@@ -188,20 +189,48 @@ function analyzeIntent(message) {
     return { type: 'gift', needsMore: true };
   }
   
-  // Produktové kľúčové slová - jasne hľadá produkt
-  const productKeywords = [
-    'šampón', 'mydlo', 'krém', 'parfém', 'dezodorant', 'zubná', 
-    'prací', 'čistiaci', 'kozmetik', 'makeup', 'rúž', 'sprchov',
-    'gel', 'pasta', 'pleť', 'vlasy', 'telo', 'ruky', 'tvár',
-    'prášok', 'aviváž', 'wc', 'toaletn', 'papier', 'utierky',
-    'hľadám', 'potrebujem', 'chcem', 'kúpiť', 'kúpi', 'produkt'
+  // ŠIROKÉ KATEGÓRIE - potrebujú spresnenie (1-2 slová, všeobecný pojem)
+  const broadCategories = [
+    'upratovanie', 'upratovat', 'cistenie', 'cistit', 'cistic',
+    'kozmetika', 'kozmetiku', 'krasa', 'makeup',
+    'pranie', 'prat', 'oblecenie',
+    'hygiena', 'hygienicke', 'osobna',
+    'domacnost', 'dom', 'byt',
+    'kuchyna', 'kuchynske',
+    'kupelna', 'kupelne',
+    'vlasy', 'vlasova', 'vlasove',
+    'telo', 'telova', 'telove',
+    'zuby', 'ustna', 'ustnu',
+    'vona', 'vone', 'parfem', 'vonavky',
+    'deti', 'detske', 'dieta',
+    'zvierata', 'pes', 'macka'
   ];
   
-  const hasProductKeyword = productKeywords.some(kw => lower.includes(kw));
+  const isBroadCategory = broadCategories.some(cat => 
+    normalized === cat || 
+    (words.length <= 2 && normalized.includes(cat))
+  );
+  
+  if (isBroadCategory && words.length <= 2) {
+    console.log('📦 Rozpoznaný zámer: široká kategória - potrebuje spresnenie');
+    return { type: 'broad_category', needsMore: true, category: lower };
+  }
+  
+  // Produktové kľúčové slová - jasne hľadá konkrétny produkt
+  const productKeywords = [
+    'šampón', 'mydlo', 'krém', 'parfém', 'dezodorant', 'zubná', 
+    'prací', 'čistiaci', 'makeup', 'rúž', 'sprchov',
+    'gel', 'pasta', 'pleť', 'ruky', 'tvár',
+    'prášok', 'aviváž', 'wc', 'toaletn', 'papier', 'utierky',
+    'hľadám', 'potrebujem', 'chcem', 'kúpiť', 'kúpi', 'produkt',
+    'jar', 'persil', 'ariel', 'nivea', 'dove', 'colgate' // značky
+  ];
+  
+  const hasProductKeyword = productKeywords.some(kw => lower.includes(kw) || normalized.includes(normalizeForSearch(kw)));
   
   if (hasProductKeyword) {
-    // Ak je len 1-2 slová, potrebuje spresnenie
-    if (words.length <= 2) {
+    // Ak je len 1 slovo a nie je to značka, potrebuje spresnenie
+    if (words.length === 1 && !['jar', 'persil', 'ariel', 'nivea', 'dove', 'colgate'].some(b => lower.includes(b))) {
       console.log('📦 Rozpoznaný zámer: všeobecná kategória (potrebuje spresnenie)');
       return { type: 'general_category', needsMore: true };
     }
@@ -209,7 +238,7 @@ function analyzeIntent(message) {
     return { type: 'specific_search' };
   }
   
-  // Ak má dosť slov, skús to ako vyhľadávanie
+  // Ak má dosť slov (3+), skús to ako vyhľadávanie
   if (words.length >= 3) {
     console.log('🔍 Rozpoznaný zámer: vyhľadávanie (viac slov)');
     return { type: 'specific_search' };
@@ -244,7 +273,16 @@ async function buildContext(message, intent) {
       case 'general_question':
         // Pre tieto zámery NEHĽADÁME produkty - je to len konverzácia
         console.log('💬 Konverzačný zámer - nehľadám produkty');
-        context.stats = await getStats(); // Len základné info o obchode
+        context.stats = await getStats();
+        break;
+      
+      case 'broad_category':
+      case 'general_category':
+        // Široká kategória - NEHĽADÁME produkty, ale dáme info o kategóriách
+        console.log('📦 Široká kategória - čakám na spresnenie');
+        context.stats = await getStats();
+        context.categories = await getCategories();
+        // Nepridávame produkty - nech sa AI opýta
         break;
         
       case 'discounts':
@@ -346,7 +384,7 @@ ${context.products.map((p, i) => `${i + 1}. **${p.title}**
    URL: ${p.url}`).join('\n\n')}`;
   }
   
-  if (context.categories && context.categories.length > 0) {
+  if (context.categories && context.categories.length > 0 && !context.products.length) {
     contextMessage = `KATEGÓRIE V OBCHODE:
 ${context.categories.slice(0, 10).map(c => `- ${c.name} (${c.count} produktov)`).join('\n')}`;
   }
@@ -358,6 +396,16 @@ ${context.brands.slice(0, 15).map(b => `- ${b.name} (${b.count} produktov)`).joi
   
   // Pre konverzačné zámery nepotrebujeme upozornenie o chýbajúcich produktoch
   const conversationalIntents = ['greeting', 'thanks', 'conversation', 'general_question'];
+  
+  // Pri širokej kategórii - inštruuj AI aby sa opýtala
+  if (intent.type === 'broad_category' || intent.type === 'general_category') {
+    contextMessage += `\n\nPOZNÁMKA: Zákazník použil široký pojem "${message}". 
+NEODPORÚČAJ produkty! Namiesto toho sa HO OPÝTAJ na konkrétnejšiu požiadavku.
+Príklady otázok:
+- Na čo konkrétne to potrebujete? (napr. podlaha, okná, WC, kuchyňa...)
+- Hľadáte niečo na konkrétny účel alebo od nejakej značky?
+- Aký typ produktu by vás zaujímal?`;
+  }
   
   // Ak nemáme produkty ani iný kontext, upozorni AI (ale len ak hľadal produkty)
   if (!contextMessage && !conversationalIntents.includes(intent.type)) {
