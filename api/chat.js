@@ -138,9 +138,18 @@ export default async function handler(req, res) {
     const intent = analyzeIntent(message);
     console.log(`💬 Správa: "${message}" | Zámer: ${intent.type}`);
     
-    // Vytvor rozšírený dotaz z histórie pre follow-up otázky
-    const enhancedMessage = enhanceQueryFromHistory(message, history, intent);
-    console.log(`🔄 Enhanced query: "${enhancedMessage}"`);
+    // Pre konverzačné zámery NEPOUŽÍVAME enhanceQueryFromHistory
+    // (nechceme aby sa zobrazili produkty z cache)
+    const conversationalIntents = ['greeting', 'thanks', 'conversation', 'general_question'];
+    let enhancedMessage = message;
+    
+    if (!conversationalIntents.includes(intent.type)) {
+      // Vytvor rozšírený dotaz z histórie pre follow-up otázky
+      enhancedMessage = enhanceQueryFromHistory(message, history, intent);
+      console.log(`🔄 Enhanced query: "${enhancedMessage}"`);
+    } else {
+      console.log(`💬 Konverzačný zámer - preskakujem enhanceQueryFromHistory`);
+    }
     
     // Získaj kontext na základe zámeru
     const context = await buildContext(enhancedMessage, intent);
@@ -245,9 +254,18 @@ function analyzeIntent(message) {
   }
   
   // Konverzačné otázky o pomoci (bez konkrétneho produktu)
-  if (/v\s*čom.*porad|čo.*porad|ako.*pomôž|s\s*čím.*pomôž|čo.*odporúč|čo.*ďalšie|čo.*ponúka/i.test(lower) ||
-      /pomôž.*mi|poraď.*mi|čo.*vie[šm]/i.test(lower) ||
-      /aké.*máte.*produkt|čo.*všetko.*máte/i.test(lower)) {
+  // Vrátane variantov bez diakritiky
+  if (/v\s*c(o|ô)m.*(porad|pomoz|pomôž)/i.test(lower) ||
+      /c(o|ô).*(porad|pomoz|pomôž)/i.test(lower) ||
+      /s\s*c(i|í)m.*(pomoz|pomôž)/i.test(lower) ||
+      /(pomoz|pomôž).*mi/i.test(lower) ||
+      /(porad|poraď).*mi/i.test(lower) ||
+      /co.*(este|ešte).*(vie|vies|vieš)/i.test(lower) ||
+      /v\s*com.*este.*vie/i.test(lower) ||
+      /ake.*mate.*produkt/i.test(lower) ||
+      /co.*vsetko.*mate/i.test(lower) ||
+      /co.*dalsie|co.*ďalšie/i.test(lower) ||
+      /co.*ponuka|čo.*ponúka/i.test(lower)) {
     console.log('💬 Rozpoznaný zámer: konverzačná otázka o pomoci');
     return { type: 'conversation' };
   }
