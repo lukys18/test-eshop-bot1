@@ -3,7 +3,7 @@
   window.marcelChatbotLoaded = true;
 
   // Vercel URL - ZMENIŤ LEN TU
-  const VERCEL_URL = "https://test-eshop-bot1.vercel.app";
+  const VERCEL_URL = "https://drogeria-domov.vercel.app";
 
   // Povolene domény
   const allowed = ["ragnetiq.com", "localhost", "127.0.0.1"];
