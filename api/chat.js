@@ -206,21 +206,28 @@ export default async function handler(req, res) {
     const data = await response.json();
     let reply = data.choices[0]?.message?.content || 'Prepáčte, nastala chyba.';
 
+    console.log('🤖 AI raw response:', reply.substring(0, 200) + '...');
+
     // Extrahuj [PRODUCTS:...] tag z odpovede
     const productsTagMatch = reply.match(/\[PRODUCTS?:([^\]]+)\]/i);
     let requestedProductIds = [];
     
     if (productsTagMatch) {
+      console.log('🏷️ Nájdený PRODUCTS tag:', productsTagMatch[0]);
+      
       // Odstráň tag z odpovede (užívateľ ho nevidí)
       reply = reply.replace(/\[PRODUCTS?:[^\]]+\]/gi, '').trim();
       
-      // Parsuj ID produktov
+      // Parsuj ID produktov - odstráň prípadné "ID:" prefixy
       requestedProductIds = productsTagMatch[1]
         .split(',')
-        .map(id => id.trim())
+        .map(id => id.trim().replace(/^ID:/i, '').trim())
         .filter(id => id.length > 0);
       
-      console.log('🏷️ AI označila produkty:', requestedProductIds);
+      console.log('🏷️ Parsované ID produktov:', requestedProductIds);
+      console.log('🏷️ Dostupné produkty v kontexte:', context.products?.map(p => p.id) || []);
+    } else {
+      console.log('⚠️ Žiadny PRODUCTS tag v odpovedi');
     }
 
     // Detekuj či AI hovorí že produkty nie sú relevantné alebo ich nemá
@@ -691,27 +698,22 @@ function buildMessages(message, history, context, intent) {
   }
   
   if (context.products && context.products.length > 0) {
+    // Vytvor zoznam ID pre jednoduchší tag
+    const productIdList = context.products.map(p => p.id).join(', ');
+    
     contextMessage += `\n\nPÔVODNÁ POŽIADAVKA ZÁKAZNÍKA: "${message}"
 
 NÁJDENÉ PRODUKTY (${context.products.length} z ${context.searchInfo?.total || '?'}):
+Dostupné ID produktov: ${productIdList}
 
 ${context.products.map((p, i) => {
-  let productInfo = `${i + 1}. [ID:${p.id}] **${p.title}**
+  let productInfo = `PRODUKT ${i + 1}:
+   ID: ${p.id}
+   Názov: ${p.title}
    Značka: ${p.brand || 'neuvedená'}
    Kategória: ${p.category || p.categoryMain}
-   Cena: ${p.salePrice ? `~~${p.price}€~~ **${p.salePrice}€** (-${p.discountPercent}%)` : `${p.price}€`}`;
+   Cena: ${p.salePrice ? `${p.price}€ → ${p.salePrice}€ (ZĽAVA -${p.discountPercent}%)` : `${p.price}€`}`;
    
-  // Pridaj relevanciu z analýzy
-  if (p._score) {
-    productInfo += `\n   Skóre relevancie: ${p._score}/100`;
-  }
-  if (p._breakdown) {
-    const b = p._breakdown;
-    if (b.productType > 0) productInfo += ` (typ produktu: ✓)`;
-    if (b.targetGroup > 0) productInfo += ` (cieľová skupina: ✓)`;
-    if (b.problemSolving > 0) productInfo += ` (rieši problém: ✓)`;
-  }
-  
   if (p.description) {
     productInfo += `\n   Popis: ${p.description.substring(0, 150)}...`;
   }
@@ -720,12 +722,12 @@ ${context.products.map((p, i) => {
 }).join('\n\n')}
 
 DÔLEŽITÉ INŠTRUKCIE:
-- Produkty sú už ZORADENÉ podľa relevancie (najrelevantnejší prvý)
-- Pri odporúčaní zdôrazni PREČO je daný produkt vhodný pre zákazníka
-- Spomeň kľúčové benefity z popisu
+- Odporuč LEN produkty z tohto zoznamu
+- Pri odporúčaní zdôrazni PREČO je daný produkt vhodný
 - Ak má produkt zľavu, zdôrazni to!
-- Skontroluj či tieto produkty skutočne zodpovedajú požiadavke zákazníka!
-- NEZABUDNI na konci odpovede pridať tag [PRODUCTS:id1,id2,...] s ID produktov ktoré odporúčaš!`;
+- NA KONCI odpovede MUSÍŠ pridať tag s ID produktov ktoré odporúčaš vo formáte:
+  [PRODUCTS:1594,1595,1596]
+  Použi presne tie čísla ID ktoré sú uvedené vyššie!`;
   }
   
   if (context.categories && context.categories.length > 0 && !context.products.length) {
