@@ -201,23 +201,95 @@ export default async function handler(req, res) {
 
     // Detekuj či AI hovorí že produkty nie sú relevantné alebo ich nemá
     const replyLower = reply.toLowerCase();
+    const replyNormalized = normalizeForSearch(reply);
     const aiSaysNoProducts = /nemám v ponuke|nenašl|nenasiel|nemáme|nema\s*v\s*ponuke|momentálne nemám|žiadne produkty|ziadne produkty|nie sú relevantné|nie su relevantne|neodporúčam tieto|neodporucam tieto/.test(replyLower);
     
-    // Priprav produkty pre frontend (klikateľné kartičky) - LEN ak sú relevantné
+    // Priprav produkty pre frontend (klikateľné kartičky) - LEN tie ktoré AI skutočne odporučila
     let productsForDisplay = [];
     
     if (context.products?.length > 0 && !aiSaysNoProducts) {
-      productsForDisplay = context.products.slice(0, 5).map(p => ({
-        id: p.id,
-        title: p.title,
-        price: p.price,
-        salePrice: p.salePrice,
-        hasDiscount: p.hasDiscount,
-        discountPercent: p.discountPercent,
-        image: p.image,
-        url: p.url,
-        brand: p.brand
-      }));
+      // Filtruj produkty - zobraz len tie, ktoré AI skutočne spomenula v odpovedi
+      const mentionedProducts = context.products.filter(p => {
+        const titleNormalized = normalizeForSearch(p.title);
+        const brandNormalized = normalizeForSearch(p.brand || '');
+        
+        // Skontroluj či je produkt spomenutý v odpovedi
+        // Hľadáme:
+        // 1. Celý názov produktu
+        // 2. Značku produktu
+        // 3. Prvé 3+ slová z názvu (pre dlhé názvy)
+        
+        // Celý názov alebo značka
+        if (replyNormalized.includes(titleNormalized) || 
+            (brandNormalized.length > 2 && replyNormalized.includes(brandNormalized))) {
+          return true;
+        }
+        
+        // Prvé slová z názvu (aspoň 3 slová alebo 15 znakov)
+        const titleWords = titleNormalized.split(/\s+/).filter(w => w.length > 2);
+        if (titleWords.length >= 2) {
+          // Skús prvé 2-4 slová
+          for (let i = 2; i <= Math.min(4, titleWords.length); i++) {
+            const partialTitle = titleWords.slice(0, i).join(' ');
+            if (partialTitle.length >= 8 && replyNormalized.includes(partialTitle)) {
+              return true;
+            }
+          }
+        }
+        
+        // Skontroluj aj kľúčové slová z názvu (bez stopwords)
+        const significantWords = titleWords.filter(w => 
+          w.length >= 4 && 
+          !['produkt', 'super', 'extra', 'special', 'original'].includes(w)
+        );
+        
+        // Ak aspoň 2 významné slová z názvu sú v odpovedi
+        const matchedWords = significantWords.filter(w => replyNormalized.includes(w));
+        if (matchedWords.length >= 2) {
+          return true;
+        }
+        
+        return false;
+      });
+      
+      console.log('🔍 Filtrovanie produktov podľa AI odpovede:');
+      console.log(`   Pôvodne: ${context.products.length} produktov`);
+      console.log(`   Spomenutých v odpovedi: ${mentionedProducts.length}`);
+      
+      if (mentionedProducts.length > 0) {
+        // Zobraz len spomenuté produkty
+        productsForDisplay = mentionedProducts.slice(0, 5).map(p => ({
+          id: p.id,
+          title: p.title,
+          price: p.price,
+          salePrice: p.salePrice,
+          hasDiscount: p.hasDiscount,
+          discountPercent: p.discountPercent,
+          image: p.image,
+          url: p.url,
+          brand: p.brand
+        }));
+      } else {
+        // Ak AI nespomenula žiadne konkrétne produkty ale odpovedala pozitívne,
+        // zobraz prvé 3 (konzervatívnejší prístup)
+        const aiSaysPositive = /našl|odporúčam|ponúkam|mám pre vás|vyskúšajte|odporucam|ponukam/i.test(replyLower);
+        if (aiSaysPositive) {
+          console.log('   AI odpovedala pozitívne ale nespomenula konkrétne produkty - zobrazujem top 3');
+          productsForDisplay = context.products.slice(0, 3).map(p => ({
+            id: p.id,
+            title: p.title,
+            price: p.price,
+            salePrice: p.salePrice,
+            hasDiscount: p.hasDiscount,
+            discountPercent: p.discountPercent,
+            image: p.image,
+            url: p.url,
+            brand: p.brand
+          }));
+        } else {
+          console.log('   AI nespomenula produkty a odpoveď nie je pozitívna - nezobrazujem kartičky');
+        }
+      }
     }
     
     if (aiSaysNoProducts) {
