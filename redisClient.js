@@ -491,30 +491,6 @@ async function getAllProducts() {
   return productsCache;
 }
 
-// Načítaj všetky produkty (s cache)
-async function getAllProducts() {
-  const now = Date.now();
-  
-  // Použij cache ak je čerstvá
-  if (productsCache && (now - cacheTime) < CACHE_TTL) {
-    return productsCache;
-  }
-  
-  const redis = getRedisClient();
-  const data = await redis.get('products:all');
-  
-  if (!data) {
-    console.log('⚠️ Žiadne produkty v databáze');
-    return [];
-  }
-  
-  productsCache = typeof data === 'string' ? JSON.parse(data) : data;
-  cacheTime = now;
-  
-  console.log(`📦 Načítaných ${productsCache.length} produktov z Redis`);
-  return productsCache;
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // HLAVNÁ VYHĽADÁVACIA FUNKCIA
 // ═══════════════════════════════════════════════════════════════════════════
