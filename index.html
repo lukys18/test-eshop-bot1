@@ -28,7 +28,7 @@
         </div>
         <div class="user-details">
           <div class="user-name">Drogéria Domov</div>
-          <div class="user-status">Online • Tu som pre vás</div>
+          <div class="user-status">Online • Som tu pre Vás</div>
         </div>
       </div>
       
@@ -47,6 +47,9 @@
       <div id="input-area">
         <textarea id="user-input" placeholder="Napíšte svoju otázku..."></textarea>
         <button onclick="sendMessage()"><i class="fas fa-paper-plane"></i></button>
+      </div>
+      <div id="chatbot-footer">
+        Vyrobil <a href="https://ragnetiq.com" target="_blank" rel="noopener noreferrer">Ragnetiq</a>
       </div>
     </div>
   </div>
@@ -99,8 +102,7 @@
         <button class="quick-reply-btn" onclick="handleQuickReply('Hľadám niečo na upratovanie')">Upratovanie</button>
         <button class="quick-reply-btn" onclick="handleQuickReply('Potrebujem kozmetiku')">Kozmetika</button>
         <button class="quick-reply-btn" onclick="handleQuickReply('Hľadám prací prášok')">Pranie</button>
-        <button class="quick-reply-btn" onclick="handleQuickReply('Máte nejaké zľavy?')">Zľavy</button>
-        <button class="quick-reply-btn" onclick="handleQuickReply('Poraďte mi prosím')">Poradenstvo</button>
+        <button class="quick-reply-btn" onclick="handleQuickReply('Potrebujem niečo pre domácnosť')">Domácnosť</button>
       `;
       chatbox.appendChild(quickRepliesDiv);
     });
