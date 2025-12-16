@@ -114,12 +114,11 @@ CROSS-SELL A UPSELL:
 - Po odporúčaní hlavného produktu môžeš navrhnúť doplnkový produkt
 - Napr. "K tomuto šampónu by sa hodil aj kondicionér tej istej značky"
 
-KRITICKY DÔLEŽITÉ - OZNAČOVANIE PRODUKTOV:
-Na KONIEC každej odpovede kde odporúčaš produkty MUSÍŠ pridať skrytý tag s ID produktov, ktoré si odporučil.
-Formát: [PRODUCTS:id1,id2,id3]
-Použi PRESNE tie ID produktov, ktoré sú uvedené v sekcii "NÁJDENÉ PRODUKTY".
-Ak neodporúčaš žiadne produkty, nepridávaj tento tag.
-Príklad: Ak odporúčaš produkty s ID "prod123" a "prod456", na koniec odpovede pridaj: [PRODUCTS:prod123,prod456]
+DÔLEŽITÉ PRE ODPORÚČANIE:
+- Vždy uveď PRESNÝ NÁZOV produktu ako je v zozname
+- Uveď aj CENU produktu
+- Ak má produkt ZĽAVU, zdôrazni pôvodnú a zľavnenú cenu
+- Produkty sa automaticky zobrazia ako klikateľné kartičky pod tvojou odpoveďou
 
 Odpovedaj VŽDY po slovensky, priateľsky a stručne.`;
 
@@ -206,29 +205,16 @@ export default async function handler(req, res) {
     const data = await response.json();
     let reply = data.choices[0]?.message?.content || 'Prepáčte, nastala chyba.';
 
-    console.log('🤖 AI raw response:', reply.substring(0, 200) + '...');
+    console.log('🤖 AI raw response length:', reply.length);
 
-    // Extrahuj [PRODUCTS:...] tag z odpovede
-    const productsTagMatch = reply.match(/\[PRODUCTS?:([^\]]+)\]/i);
-    let requestedProductIds = [];
+    // Odstráň akékoľvek [PRODUCTS:...] alebo podobné tagy z odpovede
+    // (pre prípad že AI ich pridá aj keď nemá)
+    reply = reply.replace(/\[PRODUCTS?:[^\]]*\]/gi, '').trim();
+    reply = reply.replace(/\[ID:[^\]]*\]/gi, '').trim();
     
-    if (productsTagMatch) {
-      console.log('🏷️ Nájdený PRODUCTS tag:', productsTagMatch[0]);
-      
-      // Odstráň tag z odpovede (užívateľ ho nevidí)
-      reply = reply.replace(/\[PRODUCTS?:[^\]]+\]/gi, '').trim();
-      
-      // Parsuj ID produktov - odstráň prípadné "ID:" prefixy
-      requestedProductIds = productsTagMatch[1]
-        .split(',')
-        .map(id => id.trim().replace(/^ID:/i, '').trim())
-        .filter(id => id.length > 0);
-      
-      console.log('🏷️ Parsované ID produktov:', requestedProductIds);
-      console.log('🏷️ Dostupné produkty v kontexte:', context.products?.map(p => p.id) || []);
-    } else {
-      console.log('⚠️ Žiadny PRODUCTS tag v odpovedi');
-    }
+    // Odstráň aj dlhé sekvencie núl alebo podobné artefakty
+    reply = reply.replace(/[0]{20,}/g, '').trim();
+    reply = reply.replace(/\n{3,}/g, '\n\n').trim();
 
     // Detekuj či AI hovorí že produkty nie sú relevantné alebo ich nemá
     const replyLower = reply.toLowerCase();
@@ -238,92 +224,69 @@ export default async function handler(req, res) {
     let productsForDisplay = [];
     
     if (context.products?.length > 0 && !aiSaysNoProducts) {
+      console.log('🔍 Hľadám produkty spomenuté v texte odpovede');
       
-      // METÓDA 1: Ak AI označila produkty tagom [PRODUCTS:...]
-      if (requestedProductIds.length > 0) {
-        console.log('🎯 Používam produkty z [PRODUCTS] tagu');
+      const replyNormalized = normalizeForSearch(reply);
+      
+      // Hľadaj produkty ktoré AI skutočne spomenula
+      const mentionedProducts = context.products.filter(p => {
+        const titleNormalized = normalizeForSearch(p.title);
+        const brandNormalized = normalizeForSearch(p.brand || '');
         
-        // Filtruj produkty podľa ID
-        const taggedProducts = context.products.filter(p => 
-          requestedProductIds.includes(p.id) || 
-          requestedProductIds.includes(String(p.id))
-        );
-        
-        if (taggedProducts.length > 0) {
-          productsForDisplay = taggedProducts.map(p => ({
-            id: p.id,
-            title: p.title,
-            price: p.price,
-            salePrice: p.salePrice,
-            hasDiscount: p.hasDiscount,
-            discountPercent: p.discountPercent,
-            image: p.image,
-            url: p.url,
-            brand: p.brand
-          }));
-          console.log(`   ✅ Nájdených ${taggedProducts.length} produktov z tagu`);
-        } else {
-          console.log('   ⚠️ Žiadne produkty nenájdené podľa ID z tagu, skúšam fallback');
+        // 1. Celý názov produktu
+        if (replyNormalized.includes(titleNormalized)) {
+          console.log(`   ✓ Nájdený celý názov: ${p.title}`);
+          return true;
         }
-      }
-      
-      // METÓDA 2: Fallback - hľadaj produkty spomenuté v texte
-      if (productsForDisplay.length === 0) {
-        console.log('🔍 Fallback: Hľadám produkty spomenuté v texte odpovede');
         
-        const replyNormalized = normalizeForSearch(reply);
-        
-        const mentionedProducts = context.products.filter(p => {
-          const titleNormalized = normalizeForSearch(p.title);
-          const brandNormalized = normalizeForSearch(p.brand || '');
-          
-          // Celý názov
-          if (replyNormalized.includes(titleNormalized)) {
+        // 2. Značka + kľúčové slová z názvu
+        const titleWords = titleNormalized.split(/\s+/).filter(w => w.length > 3);
+        if (brandNormalized.length > 2 && replyNormalized.includes(brandNormalized)) {
+          const matchCount = titleWords.filter(w => replyNormalized.includes(w)).length;
+          if (matchCount >= 2) {
+            console.log(`   ✓ Nájdená značka + slová: ${p.title}`);
             return true;
           }
-          
-          // Značka + typ produktu
-          if (brandNormalized.length > 2 && replyNormalized.includes(brandNormalized)) {
-            // Overiť že sa hovorí o rovnakom type produktu
-            const titleWords = titleNormalized.split(/\s+/).filter(w => w.length > 3);
-            const matchCount = titleWords.filter(w => replyNormalized.includes(w)).length;
-            if (matchCount >= 2) {
-              return true;
-            }
-          }
-          
-          // Prvé slová z názvu
-          const titleWords = titleNormalized.split(/\s+/).filter(w => w.length > 2);
-          if (titleWords.length >= 3) {
-            const partialTitle = titleWords.slice(0, 3).join(' ');
-            if (partialTitle.length >= 10 && replyNormalized.includes(partialTitle)) {
-              return true;
-            }
-          }
-          
-          return false;
-        });
-        
-        console.log(`   Nájdených ${mentionedProducts.length} produktov v texte`);
-        
-        if (mentionedProducts.length > 0) {
-          productsForDisplay = mentionedProducts.slice(0, 5).map(p => ({
-            id: p.id,
-            title: p.title,
-            price: p.price,
-            salePrice: p.salePrice,
-            hasDiscount: p.hasDiscount,
-            discountPercent: p.discountPercent,
-            image: p.image,
-            url: p.url,
-            brand: p.brand
-          }));
         }
-      }
+        
+        // 3. Prvé 3-4 slová z názvu (pre dlhé názvy)
+        if (titleWords.length >= 3) {
+          const partial3 = titleWords.slice(0, 3).join(' ');
+          const partial4 = titleWords.slice(0, 4).join(' ');
+          if ((partial3.length >= 10 && replyNormalized.includes(partial3)) ||
+              (partial4.length >= 12 && replyNormalized.includes(partial4))) {
+            console.log(`   ✓ Nájdená časť názvu: ${p.title}`);
+            return true;
+          }
+        }
+        
+        // 4. Cena + značka/typ (napr. "2.19€" + "Colgate")
+        const priceStr = String(p.salePrice || p.price);
+        if (replyNormalized.includes(priceStr) && brandNormalized.length > 2 && replyNormalized.includes(brandNormalized)) {
+          console.log(`   ✓ Nájdená cena + značka: ${p.title}`);
+          return true;
+        }
+        
+        return false;
+      });
       
-      // METÓDA 3: Ak stále nič a AI hovorí pozitívne, zobraz top produkty
-      if (productsForDisplay.length === 0) {
-        const aiSaysPositive = /našl|odporúčam|ponúkam|mám pre vás|vyskúšajte|odporucam|ponukam|áno.*máme|ano.*mame/i.test(replyLower);
+      console.log(`📊 Nájdených ${mentionedProducts.length} produktov v odpovedi z ${context.products.length}`);
+      
+      if (mentionedProducts.length > 0) {
+        productsForDisplay = mentionedProducts.slice(0, 5).map(p => ({
+          id: p.id,
+          title: p.title,
+          price: p.price,
+          salePrice: p.salePrice,
+          hasDiscount: p.hasDiscount,
+          discountPercent: p.discountPercent,
+          image: p.image,
+          url: p.url,
+          brand: p.brand
+        }));
+      } else {
+        // Ak AI odpovedá pozitívne ale nespomenula konkrétne produkty
+        const aiSaysPositive = /našl|odporúčam|ponúkam|mám pre vás|vyskúšajte|odporucam|ponukam|áno.*máme|ano.*mame|máme.*ponuke/i.test(replyLower);
         if (aiSaysPositive) {
           console.log('   AI odpovedala pozitívne - zobrazujem top 3 produkty');
           productsForDisplay = context.products.slice(0, 3).map(p => ({
@@ -337,8 +300,6 @@ export default async function handler(req, res) {
             url: p.url,
             brand: p.brand
           }));
-        } else {
-          console.log('   AI neodporučila produkty - nezobrazujem kartičky');
         }
       }
     }
@@ -723,11 +684,9 @@ ${context.products.map((p, i) => {
 
 DÔLEŽITÉ INŠTRUKCIE:
 - Odporuč LEN produkty z tohto zoznamu
-- Pri odporúčaní zdôrazni PREČO je daný produkt vhodný
-- Ak má produkt zľavu, zdôrazni to!
-- NA KONCI odpovede MUSÍŠ pridať tag s ID produktov ktoré odporúčaš vo formáte:
-  [PRODUCTS:1594,1595,1596]
-  Použi presne tie čísla ID ktoré sú uvedené vyššie!`;
+- Pri odporúčaní uveď PRESNÝ NÁZOV produktu a CENU
+- Ak má produkt zľavu, zdôrazni pôvodnú aj zľavnenú cenu!
+- Produkty sa automaticky zobrazia ako kartičky pod tvojou odpoveďou`;
   }
   
   if (context.categories && context.categories.length > 0 && !context.products.length) {
