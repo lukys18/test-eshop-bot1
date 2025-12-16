@@ -639,10 +639,17 @@ async function saveEmailEventToAPI(botSuccessMessage, emailMessageIndex) {
 
     // Funkcia na zobrazenie produktových kartičiek
     function appendProductCards(products) {
+      console.log('🎴 [appendProductCards] START');
+      console.log('🎴 [appendProductCards] Počet produktov:', products.length);
+      
       const cardsContainer = document.createElement('div');
       cardsContainer.className = 'product-cards-container';
+      console.log('🎴 [appendProductCards] Vytvorený container element');
       
-      products.forEach(product => {
+      products.forEach((product, index) => {
+        console.log(`🎴 [appendProductCards] Spracovávam produkt ${index + 1}:`, product.title);
+        console.log(`🎴 [appendProductCards] Product data:`, JSON.stringify(product, null, 2));
+        
         const card = document.createElement('a');
         card.href = product.url;
         card.target = '_blank';
@@ -650,13 +657,17 @@ async function saveEmailEventToAPI(botSuccessMessage, emailMessageIndex) {
         
         // Cena s možnou zľavou
         let priceHtml = '';
+        console.log(`🎴 [appendProductCards] ${index + 1}. hasDiscount:`, product.hasDiscount, '| salePrice:', product.salePrice, '| price:', product.price);
+        
         if (product.hasDiscount && product.salePrice) {
+          console.log(`🎴 [appendProductCards] ${index + 1}. Zobrazujem ZĽAVNENÚ cenu`);
           priceHtml = `
             <span class="product-price-old">${product.price.toFixed(2)}€</span>
             <span class="product-price-sale">${product.salePrice.toFixed(2)}€</span>
             <span class="product-discount">-${product.discountPercent}%</span>
           `;
         } else {
+          console.log(`🎴 [appendProductCards] ${index + 1}. Zobrazujem NORMÁLNU cenu`);
           priceHtml = `<span class="product-price">${product.price.toFixed(2)}€</span>`;
         }
         
@@ -671,11 +682,15 @@ async function saveEmailEventToAPI(botSuccessMessage, emailMessageIndex) {
           </div>
         `;
         
+        console.log(`🎴 [appendProductCards] ${index + 1}. Kartička vytvorená, pridávam do containera`);
         cardsContainer.appendChild(card);
       });
       
+      console.log('🎴 [appendProductCards] Všetky kartičky vytvorené, pridávam container do chatboxu');
       chatbox.appendChild(cardsContainer);
+      console.log('🎴 [appendProductCards] Container pridaný, scrollujem na spodok');
       chatbox.scrollTop = chatbox.scrollHeight;
+      console.log('🎴 [appendProductCards] HOTOVO');
     }
 
 

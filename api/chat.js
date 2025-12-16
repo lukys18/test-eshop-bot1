@@ -220,6 +220,20 @@ export default async function handler(req, res) {
       console.log('🚫 AI hovorí že produkty nie sú relevantné - nezobrazujem kartičky');
     }
 
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('📤 FINAL RESPONSE TO FRONTEND:');
+    console.log('   📝 reply length:', reply.length);
+    console.log('   📦 productsForDisplay count:', productsForDisplay.length);
+    if (productsForDisplay.length > 0) {
+      console.log('   📦 Products being sent:');
+      productsForDisplay.forEach((p, i) => {
+        console.log(`      ${i+1}. ${p.title} | price: ${p.price} | salePrice: ${p.salePrice} | hasDiscount: ${p.hasDiscount}`);
+      });
+    }
+    console.log('   🎯 intent:', intent.type);
+    console.log('   🔍 productsFound:', context.products?.length || 0);
+    console.log('═══════════════════════════════════════════════════════════');
+
     return res.status(200).json({
       reply: reply,
       products: productsForDisplay, // Produkty LEN ak sú relevantné
