@@ -429,8 +429,7 @@ function analyzeIntent(message) {
     'pampers', 'huggies', 'johnson', 'duracell', 'always', 'durex'
   ];
   
-  const normalized = normalizeForSearch(message);
-  // Kontrola či správa obsahuje produktové kľúčové slovo
+  // Kontrola či správa obsahuje produktové kľúčové slovo (normalized už existuje vyššie)
   const hasProductKeyword = productKeywords.some(kw => {
     const kwNorm = normalizeForSearch(kw);
     return lower.includes(kw) || normalized.includes(kwNorm);
