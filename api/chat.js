@@ -26,11 +26,12 @@ function enhanceQueryFromHistory(message, history, intent) {
   const followUpPatterns = [
     /^(a |a |máte |mate |iné|ine|ďalšie|dalsie|podobné|podobne|ešte|este|aj |tiež|tiez|čo ešte|co este)/i,
     /^(inú|inu|inú značku|inu znacku|inej značky|inej znacky)/i,
-    /^(lacnejšie|lacnejsie|drahšie|drahsie|väčšie|vacsie|menšie|mensie)/i
+    /^(lacnejšie|lacnejsie|drahšie|drahsie|väčšie|vacsie|menšie|mensie)/i,
+    /^(chcem|daj|dajte|potrebujem|ukaz|ukáž|zobraz|hľadám|hladam)/i
   ];
   
   const isFollowUp = followUpPatterns.some(pattern => pattern.test(lower)) || 
-                     (history.length > 0 && message.split(/\s+/).length <= 5);
+                     (history.length > 0 && message.split(/\s+/).length <= 4);
   
   if (!isFollowUp || history.length === 0) {
     return message;
@@ -44,12 +45,16 @@ function enhanceQueryFromHistory(message, history, intent) {
     'prací', 'praci', 'čistič', 'cistic', 'gel', 'pasta', 'pleť', 'plet',
     'vlasy', 'telo', 'ruky', 'tvár', 'tvar', 'prášok', 'prasok', 'aviváž', 'avivaz',
     'wc', 'toaletn', 'papier', 'riad', 'podlaha', 'okno', 'kupel', 'zuby', 'ustna',
-    'lupiny', 'lupin', 'mastné', 'mastne', 'suché', 'suche', 'poškodené', 'poskodene'
+    'lupiny', 'lupin', 'mastné', 'mastne', 'suché', 'suche', 'poškodené', 'poskodene',
+    'kondóm', 'kondom', 'lubrik', 'intím', 'intim', 'tenké', 'tenke', 'extra',
+    'sprchov', 'sprcháč', 'sprchac', 'telové', 'telove', 'balzam', 'kondic'
   ];
   
   const brandKeywords = [
     'jar', 'persil', 'ariel', 'nivea', 'dove', 'colgate', 'head', 'shoulders',
-    'pantene', 'garnier', 'loreal', 'palmolive', 'ajax', 'domestos', 'clear'
+    'pantene', 'garnier', 'loreal', 'palmolive', 'ajax', 'domestos', 'clear',
+    'durex', 'adidas', 'old spice', 'gillette', 'oral-b', 'always', 'pampers',
+    'lenor', 'fairy', 'silan', 'softlan', 'vanish', 'cillit', 'raid', 'balea'
   ];
   
   let foundKeywords = [];
@@ -81,12 +86,19 @@ function enhanceQueryFromHistory(message, history, intent) {
 // Systémový prompt pre inteligentného konverzačného asistenta
 const SYSTEM_PROMPT_BASE = `Si priateľský a inteligentný asistent online drogérie Drogéria Domov (drogeriadomov.sk).
 
-KRITICKÉ PRAVIDLÁ:
-1. Môžeš odporúčať IBA produkty, ktoré sú uvedené v sekcii "NÁJDENÉ PRODUKTY" v kontexte.
-2. Ak tam nie sú žiadne produkty, NIKDY si ich nevymýšľaj - namiesto toho sa opýtaj zákazníka na spresnenie.
-3. Zdraviť (ahoj, dobrý deň) môžeš LEN na prvú správu v konverzácii. Potom už pozdrav vynechaj.
-4. NEPÍŠ URL odkazy - produkty sa zobrazia automaticky ako klikateľné kartičky pod tvojou odpoveďou.
-5. ODPORÚČAJ LEN KATEGÓRIE Z POSKYTNUTÉHO ZOZNAMU - nevymýšľaj si vlastné kategórie!
+⚠️ NAJDÔLEŽITEJŠIE PRAVIDLO - NIKDY HO NEPORUŠUJ ⚠️
+Môžeš hovoriť IBA o produktoch ktoré vidíš v sekcii "NÁJDENÉ PRODUKTY" nižšie.
+Ak tam NIE JE žiadny produkt ktorý by vyhovoval požiadavke zákazníka:
+- NEPÍŠ názov produktu ktorý tam nie je
+- NEHOVOR "máme XYZ" ak XYZ nie je v zozname
+- Namiesto toho povedz: "Bohužiaľ, tento konkrétny produkt momentálne nemáme v ponuke. Môžem vám ponúknuť..." a spomeň produkty ktoré v zozname SÚ.
+- Ak je zoznam prázdny, opýtaj sa zákazníka na alternatívu alebo povedz že nemáme v ponuke.
+
+ĎALŠIE KRITICKÉ PRAVIDLÁ:
+1. Zdraviť (ahoj, dobrý deň) môžeš LEN na prvú správu v konverzácii. Potom už pozdrav vynechaj.
+2. NEPÍŠ URL odkazy - produkty sa zobrazia automaticky ako klikateľné kartičky pod tvojou odpoveďou.
+3. ODPORÚČAJ LEN KATEGÓRIE Z POSKYTNUTÉHO ZOZNAMU - nevymýšľaj si vlastné kategórie!
+4. Používaj PRESNÉ názvy produktov ako sú v zozname - nemeň ich!
 
 INTELIGENTNÉ ODPORÚČANIE:
 1. Analyzuj potreby zákazníka (typ produktu, problém, pohlavie, vek)
