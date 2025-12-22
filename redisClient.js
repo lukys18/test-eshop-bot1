@@ -40,8 +40,99 @@ const STOPWORDS = new Set([
   'som', 'je', 'su', 'ma', 'mi', 'si', 'sa', 'by', 'uz', 'aj', 'no', 'ak', 'ci',
   'hladam', 'potrebujem', 'chcem', 'daj', 'ukazte', 'chcela', 'chcel',
   'nejake', 'nejaky', 'niektore', 'vsetko', 'viac', 'menej',
-  'prosim', 'dakujem', 'ahoj', 'dobry', 'den'
+  'prosim', 'dakujem', 'ahoj', 'dobry', 'den', 'mate', 'máte'
 ]);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// KOMPLETNÝ ZOZNAM ZNAČIEK Z DATABÁZY
+// ═══════════════════════════════════════════════════════════════════════════
+const ALL_BRANDS = new Set([
+  // Normalizované názvy značiek (lowercase, bez diakritiky)
+  'a+', 'ace', 'adidas', 'airall', 'airpure', 'airwick', 'ait', 'ajax', 'alex', 'almusso',
+  'alpa', 'always', 'ambi pur', 'ambipur', 'antikal', 'apart', 'aquafresh', 'areon', 'ariel',
+  'asepso', 'atrix', 'aura', 'aussie', 'axe', 'b.u.', 'bu', 'baba', 'bartek candles', 'bartek',
+  'batiste', 'baula', 'bear fruits', 'bel', 'bella', 'bellawa', 'benefit', 'bi-es', 'bies',
+  'bielenda', 'bison', 'bispol', 'blend-a-dent', 'blendadent', 'blend-a-med', 'blendamed',
+  'blue stratos', 'bolsius', 'bonux', 'borotalco', 'bref', 'bril', 'bros', 'bruno banani',
+  'brunobanani', 'brut', 'bubchen', 'buzzy', 'c-thru', 'cthru', 'calgon', 'california scents',
+  'carefree', 'carex', 'chanteclair', 'charlotte', 'chemix slovakia', 'chemix', 'chemotox',
+  'chicco', 'chupa chups', 'chupachups', 'cif', 'cillit bang', 'cillitbang', 'cillit', 'citra',
+  'clean & clear', 'clean clear', 'clean fox', 'cleanfox', 'clin', 'clipper', 'coccolatevi',
+  'coccolino', 'colgate', 'corega', 'corri d-italia', 'cosmos', 'coyote', 'curaprox',
+  'daily defense', 'dash', 'david beckham', 'davidbeckham', 'beckham', 'deep fresh', 'deepfresh',
+  'delfino', 'denim', 'dentek', 'dermomed', 'detox', 'dettol', 'diadermine', 'diamo', 'diffusil',
+  'discreet', 'disney', 'doctor m', 'doctor wipes', 'domestos', 'dove', 'dr. beckmann',
+  'dr beckmann', 'drbeckmann', 'dr.marcus', 'drmarcus', 'dreft', 'dual power', 'dualpower',
+  'duck', 'duha', 'duracell', 'durex', 'duschdas', 'ecoegg', 'elmex', 'elseve', 'eos',
+  'euro stil', 'eurostil', 'eveline cosmetics', 'eveline', 'fa', 'fairy', 'falcon', 'febreze',
+  'felce azzurra', 'felceazzurra', 'figaro', 'finish', 'fino', 'fixinela', 'floraszept',
+  'fre-pro', 'frepro', 'frosch', 'fructis', 'gallus', 'gama', 'garnier', 'george science',
+  'gillette', 'glade', 'glanz meister', 'glanzmeister', 'glicemille', 'gliss', 'glisskur',
+  'got2b', 'hansaplast', 'harpic', 'hartmann', 'head & shoulders', 'head and shoulders',
+  'headshoulders', 'head shoulders', 'herba', 'herbal essences', 'herbal essences pure',
+  'herbaria', 'herbavera', 'herr klee', 'herrklee', 'hewa', 'home aroma', 'huggies', 'impulse',
+  'indulona', 'intesa', 'ionickiss', 'jack n jill', 'jacknjill', 'jar', 'jelen', 'jest',
+  'johnsons', 'johnson', 'jordan', 'kallos', 'kamill', 'kawar', 'kiwi', 'kleenex', 'kneipp',
+  'konjac', 'kotex', 'kuschelweich', 'la rive', 'larive', 'labello', 'lacalut', 'lactacyd',
+  'lactovit', 'lanza', 'le petit olivier', 'leifheit', 'lenor', 'libresse', 'lifebuoy',
+  'listerine', 'little joe', 'littlejoe', 'londa', 'loreal paris', 'loreal', "l'oreal",
+  'love beauty & planet', 'love beauty planet', 'lovela', 'lovran', 'lux', 'lysol', 'malizia',
+  'masculan', 'meridol', 'mexx', 'milmil', 'mr&mrs', 'mrmrs', 'mr. proper', 'mrproper',
+  'mr proper', 'muller', 'nature & more', 'nature more', 'nature box', 'naturebox', 'naturella',
+  'nautica voyage', 'nautica', 'neutrogena', 'nfco', 'nickelodeon', 'nicky', 'nivea', 'nodens',
+  'normal clinic', 'nova car care', 'o.b.', 'ob', 'odol-med3', 'odolmed3', 'odol', 'off!', 'off',
+  'old spice', 'oldspice', 'omo', 'opalescence', 'oral-b', 'oral b', 'oralb', 'orion', 'p&g',
+  'pg', 'paclan', 'palette', 'palmolive', 'pampers', 'pantene', 'parodontax', 'passion gold',
+  'passiongold', 'penaten', 'persil', 'perwoll', 'pielor', 'piknik', 'pinkfong', 'playboy',
+  'pledge', 'pronto', 'protex', 'pulirapid', 'pupa', 'pur', 'purox', 'pusheen', 'raid',
+  'reebok', 'rex', 'rexona', 'ria', 'saforelle', 'sagrotan', 'sanytol', 'sapone di toscana',
+  'savo', 'schauma', 'schmidts', 'scholl', 'sensodyne', 'septona', 'sidolux', 'signal', 'silan',
+  'silkroad', 'sofin', 'softlan', 'sole', 'solo', 'somat', 'spic & span', 'spic span',
+  'spuma di sciampagna', 'st. nicolaus', 'stnicolaus', 'str8', 'strep', 'sudocrem', 'surf',
+  'syoss', 'taft', 'tento', 'tesori d-oriente', 'tesoridoriente', 'tesori doriente',
+  'the pink stuff', 'pinkstuff', 'pink stuff', 'tierra verde', 'tierraverde', 'timotei',
+  'tiret', 'tomil', 'toni&guy', 'toniguy', 'toni guy', 'tresemme', 'turtle wax', 'turtlewax',
+  'umbro', 'universal', 'vademecum', 'vanish', 'veet', 'vernel', 'vinove', 'wasche meister',
+  'waschemeister', 'waschkonig', 'wave', 'wc meister', 'wcmeister', 'weisser riese',
+  'weisserriese', 'well done', 'welldone', 'wella', 'wexor', 'wilkinson', 'wojcik', 'woolite',
+  'wunder baum', 'wunderbaum', 'zendium', 'zewa', 'ziaja', 'schwarzkopf'
+]);
+
+// Funkcia pre kontrolu či slovo je značka
+function isBrand(word) {
+  const normalized = normalize(word);
+  return ALL_BRANDS.has(normalized);
+}
+
+// Funkcia pre nájdenie značky v texte
+function findBrandInText(text) {
+  const normalized = normalize(text);
+  const words = normalized.split(/\s+/);
+  
+  // Najprv skús dvojslovné značky
+  for (let i = 0; i < words.length - 1; i++) {
+    const twoWords = words[i] + ' ' + words[i + 1];
+    if (ALL_BRANDS.has(twoWords)) {
+      return twoWords;
+    }
+  }
+  
+  // Potom jednoslovné
+  for (const word of words) {
+    if (word.length >= 2 && ALL_BRANDS.has(word)) {
+      return word;
+    }
+  }
+  
+  // Skús aj bez medzier (oldspice, headshoulders)
+  for (const brand of ALL_BRANDS) {
+    if (brand.length >= 4 && normalized.includes(brand)) {
+      return brand;
+    }
+  }
+  
+  return null;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ANALÝZA CIEĽOVEJ SKUPINY - Extrakcia z produktových dát
@@ -628,8 +719,8 @@ async function getAllProducts() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * NOVÉ jednoduché vyhľadávanie produktov
- * Priorita: 1. Presná zhoda značky/názvu, 2. Čiastočná zhoda slov
+ * Jednoduché a spoľahlivé vyhľadávanie produktov
+ * Používa kompletný zoznam značiek z databázy
  */
 export async function searchProducts(query, options = {}) {
   const { limit = 5, onlyAvailable = true } = options;
@@ -646,9 +737,13 @@ export async function searchProducts(query, options = {}) {
   const queryNorm = normalize(query);
   const queryWords = queryNorm.split(/\s+/).filter(w => w.length >= 2 && !STOPWORDS.has(w));
   
-  console.log('🔤 Vyhľadávacie slová:', queryWords.join(', '));
+  // Detekuj značku v dotaze
+  const detectedBrand = findBrandInText(query);
   
-  // Skóruj produkty jednoduchým ale efektívnym spôsobom
+  console.log('🔤 Vyhľadávacie slová:', queryWords.join(', '));
+  console.log('🏷️ Detekovaná značka:', detectedBrand || 'žiadna');
+  
+  // Skóruj produkty
   const scoredProducts = [];
   
   for (const product of products) {
@@ -658,49 +753,43 @@ export async function searchProducts(query, options = {}) {
     const titleNorm = normalize(product.title || '');
     const brandNorm = normalize(product.brand || '');
     const categoryNorm = normalize(product.category || product.categoryMain || '');
-    const descNorm = normalize(product.description || '').substring(0, 200); // Len začiatok popisu
+    const descNorm = normalize(product.description || '').substring(0, 300);
+    const combined = `${titleNorm} ${brandNorm} ${categoryNorm}`;
     
     let score = 0;
     let matchReasons = [];
     
-    // === 1. PRESNÁ ZHODA CELÉHO QUERY V NÁZVE (najvyššia priorita) ===
-    if (titleNorm.includes(queryNorm)) {
-      score += 100;
-      matchReasons.push('presná zhoda v názve');
+    // === 1. ZHODA ZNAČKY (NAJVYŠŠIA PRIORITA) ===
+    if (detectedBrand) {
+      // Presná zhoda značky produktu
+      if (brandNorm.includes(detectedBrand) || detectedBrand.includes(brandNorm)) {
+        score += 60;
+        matchReasons.push(`značka: ${detectedBrand}`);
+      }
+      // Značka v názve produktu
+      else if (titleNorm.includes(detectedBrand)) {
+        score += 55;
+        matchReasons.push(`značka v názve: ${detectedBrand}`);
+      }
     }
     
-    // === 2. ZHODA ZNAČKY ===
-    // Skontroluj či niektoré query slovo je značka produktu
-    for (const word of queryWords) {
-      if (word.length >= 3) {
-        // Presná zhoda značky
-        if (brandNorm === word || brandNorm.includes(word)) {
-          score += 50;
-          matchReasons.push(`značka: ${word}`);
-          break;
-        }
-        // Značka v názve produktu
-        if (titleNorm.includes(word) && titleNorm.indexOf(word) < 30) {
-          // Slovo je na začiatku názvu = pravdepodobne značka
-          score += 40;
-          matchReasons.push(`značka v názve: ${word}`);
-          break;
-        }
-      }
+    // === 2. PRESNÁ ZHODA CELÉHO QUERY V NÁZVE ===
+    if (queryNorm.length >= 4 && titleNorm.includes(queryNorm)) {
+      score += 50;
+      matchReasons.push('presná zhoda v názve');
     }
     
     // === 3. ZHODA JEDNOTLIVÝCH SLOV ===
     let wordMatches = 0;
     for (const word of queryWords) {
-      if (word.length >= 3) {
+      if (word.length >= 3 && !isBrand(word)) {
+        // Preskočíme značku, tú sme už spracovali
         if (titleNorm.includes(word)) {
           score += 15;
           wordMatches++;
-        } else if (brandNorm.includes(word)) {
-          score += 12;
-          wordMatches++;
+          matchReasons.push(`slovo v názve: ${word}`);
         } else if (categoryNorm.includes(word)) {
-          score += 8;
+          score += 10;
           wordMatches++;
         } else if (descNorm.includes(word)) {
           score += 5;
@@ -709,20 +798,15 @@ export async function searchProducts(query, options = {}) {
       }
     }
     
-    if (wordMatches > 0) {
-      matchReasons.push(`${wordMatches}/${queryWords.length} slov`);
-    }
-    
     // === 4. BONUS ZA ZĽAVU ===
     if (product.hasDiscount) {
       score += 3;
     }
     
-    // === 5. BONUS ZA POČET MATCHNUTÝCH SLOV ===
-    // Ak matchli všetky slová, veľký bonus
-    if (queryWords.length > 1 && wordMatches === queryWords.length) {
-      score += 20;
-      matchReasons.push('všetky slová');
+    // === 5. BONUS ZA VŠETKY SLOVÁ ===
+    if (queryWords.length > 1 && wordMatches >= queryWords.length - 1) {
+      score += 15;
+      matchReasons.push('väčšina slov');
     }
     
     // Minimálne skóre pre zaradenie
@@ -752,7 +836,7 @@ export async function searchProducts(query, options = {}) {
     console.log('🏆 TOP VÝSLEDKY:');
     results.forEach((p, i) => {
       console.log(`   ${i+1}. [${p._score}] ${p.title}`);
-      console.log(`      Dôvod: ${p._matchReasons.join(', ')}`);
+      console.log(`      Dôvod: ${p._matchReasons?.join(', ') || 'N/A'}`);
     });
   } else {
     console.log('⚠️ Žiadne výsledky pre:', queryWords.join(', '));
@@ -764,7 +848,8 @@ export async function searchProducts(query, options = {}) {
     products: results,
     total: scoredProducts.length,
     query: query,
-    terms: queryWords
+    terms: queryWords,
+    detectedBrand: detectedBrand
   };
 }
 
