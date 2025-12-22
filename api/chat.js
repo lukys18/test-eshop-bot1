@@ -7,6 +7,82 @@ import { searchProducts, getCategories, getCategoriesForPrompt, getBrands, getSt
 const DEEPSEEK_API_KEY = process.env.API_KEY;
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 
+// ═══════════════════════════════════════════════════════════════════════════
+// STATICKÁ DATABÁZA - Informácie o obchode, kontakt, podmienky atď.
+// ═══════════════════════════════════════════════════════════════════════════
+const STATIC_INFO = {
+  kontakt: {
+    adresa: 'Zelený Háj 71, 947 01 Hurbanovo',
+    telefon: '+421 35 2023333',
+    email: 'eshop@drogeriadomov.sk',
+    otvaracieHodiny: 'Pondelok - Piatok: 8:00 - 16:30',
+    url: 'https://www.drogeriadomov.sk'
+  },
+  socialneMedia: {
+    instagram: 'https://www.instagram.com/drogeriadomov.sk/',
+    facebook: 'https://www.facebook.com/drogeriadomov.sk'
+  },
+  dorucenie: {
+    cas: 'Produkt bude doručený do 48 hodín.',
+    info: 'Rýchle a spoľahlivé doručenie priamo k vám domov.'
+  },
+  darcekPriNakupe: {
+    podmienka: 'Pri nákupe nad 40€',
+    info: 'Pri nákupe nad 40€ získate špeciálny darček!'
+  },
+  vratenieTovaru: {
+    url: 'https://www.drogeriadomov.sk/vratenie-tovaru',
+    info: 'Tovar môžete vrátiť do 14 dní od prevzatia. Viac informácií nájdete na stránke vrátenia tovaru.'
+  },
+  obchodnePodmienky: {
+    url: 'https://www.drogeriadomov.sk/obchodne-podmienky',
+    info: 'Kompletné obchodné podmienky nájdete na našej webovej stránke.'
+  },
+  reklamacnyPoriadok: {
+    url: 'https://www.drogeriadomov.sk/reklamacny-poriadok',
+    info: 'V prípade reklamácie postupujte podľa nášho reklamačného poriadku.'
+  },
+  ochranOsobnychUdajov: {
+    url: 'https://informovanie.osobnyudaj.sk/51468221/gdpr/sk/zakladne-informacie',
+    info: 'Vaše osobné údaje spracúvame v súlade s GDPR.'
+  }
+};
+
+// Formátovaný text pre AI prompt
+const STATIC_INFO_PROMPT = `
+INFORMÁCIE O OBCHODE (použite pri relevantných otázkach):
+
+📍 KONTAKT:
+- Adresa: ${STATIC_INFO.kontakt.adresa}
+- Telefón: ${STATIC_INFO.kontakt.telefon}
+- Email: ${STATIC_INFO.kontakt.email}
+- Otváracie hodiny: ${STATIC_INFO.kontakt.otvaracieHodiny}
+
+📱 SOCIÁLNE SIETE:
+- Instagram: ${STATIC_INFO.socialneMedia.instagram}
+- Facebook: ${STATIC_INFO.socialneMedia.facebook}
+
+🚚 DORUČENIE:
+- ${STATIC_INFO.dorucenie.cas}
+
+🎁 DARČEK PRI NÁKUPE:
+- ${STATIC_INFO.darcekPriNakupe.info}
+
+↩️ VRÁTENIE TOVARU:
+- ${STATIC_INFO.vratenieTovaru.info}
+- Viac info: ${STATIC_INFO.vratenieTovaru.url}
+
+📋 OBCHODNÉ PODMIENKY:
+- ${STATIC_INFO.obchodnePodmienky.url}
+
+📋 REKLAMAČNÝ PORIADOK:
+- ${STATIC_INFO.reklamacnyPoriadok.info}
+- Viac info: ${STATIC_INFO.reklamacnyPoriadok.url}
+
+🔒 OCHRANA OSOBNÝCH ÚDAJOV (GDPR):
+- ${STATIC_INFO.ochranOsobnychUdajov.url}
+`;
+
 // Pomocná funkcia pre normalizáciu textu (bez diakritiky)
 function normalizeForSearch(text) {
   return String(text || '')
@@ -165,7 +241,7 @@ export default async function handler(req, res) {
     
     // Pre konverzačné zámery NEPOUŽÍVAME enhanceQueryFromHistory
     // (nechceme aby sa zobrazili produkty z cache)
-    const conversationalIntents = ['greeting', 'thanks', 'conversation', 'general_question'];
+    const conversationalIntents = ['greeting', 'thanks', 'conversation', 'general_question', 'static_info'];
     let enhancedMessage = message;
     
     if (!conversationalIntents.includes(intent.type)) {
@@ -231,58 +307,57 @@ export default async function handler(req, res) {
     let productsForDisplay = [];
     
     const replyLower = reply.toLowerCase();
-    const aiExplicitlyNoProducts = /nemáme v ponuke|nemám v ponuke|žiaľ nemáme|bohužiaľ nemáme|nie je.*skladom|nemáme skladom/i.test(reply);
+    // AI explicitne hovorí že produkt NEMÁME - ale len ak je to jasné odmietnutie
+    const aiExplicitlyNoProducts = /^(bohužiaľ|žiaľ|prepáčte).*(nemáme|nie je dostupn)/i.test(reply) ||
+                                   /tento (konkrétny )?produkt (momentálne )?nemáme/i.test(reply);
     
     if (context.products?.length > 0 && !aiExplicitlyNoProducts) {
-      // Zisti koľko produktov AI skutočne odporučila v odpovedi
-      // Hľadáme produkty podľa ich názvu/značky v odpovedi
+      // NOVÁ LOGIKA: Ak máme produkty v kontexte, zobrazíme ich
+      // AI ich už dostala v prompte, takže ak nepovedala explicitne "nemáme", znamená to že ich odporučila
+      
       const matchedProducts = [];
+      const replyNorm = normalizeForSearch(reply);
       
       for (const product of context.products) {
         const titleNorm = normalizeForSearch(product.title);
         const brandNorm = normalizeForSearch(product.brand || '');
-        const replyNorm = normalizeForSearch(reply);
         
-        // Produkt je "spomenutý" ak:
-        // 1. Jeho značka je v odpovedi
-        // 2. Aspoň 2 slová z názvu sú v odpovedi
-        // 3. Jeho cena je v odpovedi
-        let isMatched = false;
         let matchScore = 0;
         
-        // Zhoda značky
-        if (brandNorm.length >= 3 && replyNorm.includes(brandNorm)) {
+        // Zhoda značky (case insensitive)
+        if (brandNorm.length >= 2 && replyNorm.includes(brandNorm)) {
+          matchScore += 40;
+        }
+        
+        // Zhoda slov z názvu (stačí 1 slovo s 5+ znakmi)
+        const titleWords = titleNorm.split(/\s+/).filter(w => w.length >= 4);
+        for (const word of titleWords) {
+          if (replyNorm.includes(word)) {
+            matchScore += 15;
+          }
+        }
+        
+        // Zhoda ceny (hľadáme číslo v odpovedi)
+        const priceStr = String(product.salePrice || product.price).replace('.', ',');
+        const priceStrDot = String(product.salePrice || product.price);
+        if (reply.includes(priceStr) || reply.includes(priceStrDot)) {
           matchScore += 30;
         }
         
-        // Zhoda slov z názvu
-        const titleWords = titleNorm.split(/\s+/).filter(w => w.length >= 4);
-        let wordMatches = 0;
-        for (const word of titleWords) {
-          if (replyNorm.includes(word)) {
-            wordMatches++;
-          }
-        }
-        if (wordMatches >= 2) {
-          matchScore += 20 * wordMatches;
-        }
-        
-        // Zhoda ceny
-        const priceStr = String(product.salePrice || product.price);
-        if (reply.includes(priceStr)) {
-          matchScore += 25;
-        }
-        
-        if (matchScore >= 30) {
+        // Ak má akékoľvek skóre, pridaj
+        if (matchScore > 0) {
           matchedProducts.push({ product, matchScore });
         }
       }
       
-      // Zoraď podľa skóre a vyber
+      // Zoraď podľa skóre
       matchedProducts.sort((a, b) => b.matchScore - a.matchScore);
       
+      console.log(`🔍 Matching výsledky: ${matchedProducts.length} z ${context.products.length} produktov`);
+      matchedProducts.forEach(m => console.log(`   - ${m.product.title}: skóre ${m.matchScore}`));
+      
       if (matchedProducts.length > 0) {
-        // Zobraz len produkty ktoré AI skutočne spomenula
+        // Zobraz produkty ktoré AI spomenula (max 5)
         productsForDisplay = matchedProducts.slice(0, 5).map(m => ({
           id: m.product.id,
           title: m.product.title,
@@ -296,26 +371,32 @@ export default async function handler(req, res) {
         }));
         console.log(`✅ AI spomenula ${matchedProducts.length} produktov, zobrazujem ${productsForDisplay.length}`);
       } else {
-        // Fallback: Ak AI neodpovedala štruktúrovane, zobraz top 1-3 podľa skóre vyhľadávania
-        // Počet závisí od toho či AI hovorí o viacerých produktoch
-        const mentionsMultiple = /produkty|niekoľko|viaceré|máme tieto|v ponuke máme/i.test(reply);
-        const displayCount = mentionsMultiple ? 3 : 1;
+        // FALLBACK: Ak matching nenašiel nič ale odpoveď obsahuje produktové info, zobraz všetky z kontextu
+        // Kontrolujeme či AI vôbec hovorí o produktoch
+        const talksAboutProducts = /€|eur|cena|produkt|ponúkam|odporúčam|máme|silica|olej|šampón|krém|čistič/i.test(reply);
         
-        productsForDisplay = context.products.slice(0, displayCount).map(p => ({
-          id: p.id,
-          title: p.title,
-          price: p.price,
-          salePrice: p.salePrice,
-          hasDiscount: p.hasDiscount,
-          discountPercent: p.discountPercent,
-          image: p.image,
-          url: p.url,
-          brand: p.brand
-        }));
-        console.log(`✅ Fallback: zobrazujem top ${displayCount} produktov`);
+        if (talksAboutProducts) {
+          // Zobraz všetky produkty z kontextu (max 5)
+          productsForDisplay = context.products.slice(0, 5).map(p => ({
+            id: p.id,
+            title: p.title,
+            price: p.price,
+            salePrice: p.salePrice,
+            hasDiscount: p.hasDiscount,
+            discountPercent: p.discountPercent,
+            image: p.image,
+            url: p.url,
+            brand: p.brand
+          }));
+          console.log(`✅ Fallback: AI hovorí o produktoch, zobrazujem všetkých ${productsForDisplay.length} z kontextu`);
+        } else {
+          console.log(`⚠️ AI nehovorí o produktoch, nezobrazujem kartičky`);
+        }
       }
     } else if (aiExplicitlyNoProducts) {
       console.log('🚫 AI explicitne hovorí že produkty nemáme');
+    } else if (context.products?.length === 0) {
+      console.log('⚠️ Žiadne produkty v kontexte');
     }
 
     console.log('═══════════════════════════════════════════════════════════');
@@ -367,6 +448,58 @@ function analyzeIntent(message) {
   if (/^(ďakujem|dakujem|vďaka|dík|díky|diky|super|ok|okej|fajn|dobre|áno|ano|nie|dovidenia|zbohom|ahoj\s*$)/i.test(lower) && words.length <= 3) {
     console.log('🙏 Rozpoznaný zámer: poďakovanie/rozlúčka');
     return { type: 'thanks' };
+  }
+  
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STATICKÉ INFORMÁCIE - kontakt, doručenie, vrátenie, reklamácie, GDPR atď.
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  // Kontakt
+  if (/kontakt|telefón|telefon|email|e-mail|adresa|kde.*ste|kde.*nájdem|kde.*najdem|otvárac|otvarac|hodiny|kedy.*otvoren/i.test(lower)) {
+    console.log('📞 Rozpoznaný zámer: kontakt');
+    return { type: 'static_info', infoType: 'kontakt' };
+  }
+  
+  // Sociálne siete
+  if (/instagram|facebook|fb|insta|sociáln|socialn|sledov/i.test(lower)) {
+    console.log('📱 Rozpoznaný zámer: sociálne siete');
+    return { type: 'static_info', infoType: 'socialneMedia' };
+  }
+  
+  // Doručenie / doprava
+  if (/doruč|doruc|doprav|posiel|poslat|kedy.*príde|kedy.*pride|ako.*dlho|dodac/i.test(lower)) {
+    console.log('🚚 Rozpoznaný zámer: doručenie');
+    return { type: 'static_info', infoType: 'dorucenie' };
+  }
+  
+  // Darček pri nákupe
+  if (/darček.*nákup|darcek.*nakup|bonus|nad.*40|nad.*€|zdarma.*nákup/i.test(lower)) {
+    console.log('🎁 Rozpoznaný zámer: darček pri nákupe');
+    return { type: 'static_info', infoType: 'darcekPriNakupe' };
+  }
+  
+  // Vrátenie tovaru
+  if (/vráti|vrati|vrátenie|vratenie|môžem.*vráti|mozem.*vrati|nechcem|odstúpi|odstupi|14.*dn/i.test(lower)) {
+    console.log('↩️ Rozpoznaný zámer: vrátenie tovaru');
+    return { type: 'static_info', infoType: 'vratenieTovaru' };
+  }
+  
+  // Reklamácia
+  if (/reklam|pokazen|nefunguj|poškoden|poskoden|chyb.*tovar|vadný|vadny/i.test(lower)) {
+    console.log('🔧 Rozpoznaný zámer: reklamácia');
+    return { type: 'static_info', infoType: 'reklamacnyPoriadok' };
+  }
+  
+  // Obchodné podmienky
+  if (/obchodn.*podmienk|VOP|podmienk.*nákup|podmienk.*nakup/i.test(lower)) {
+    console.log('📋 Rozpoznaný zámer: obchodné podmienky');
+    return { type: 'static_info', infoType: 'obchodnePodmienky' };
+  }
+  
+  // GDPR / Ochrana údajov
+  if (/gdpr|osobn.*údaj|osobn.*udaj|súkrom|sukrom|ochran.*údaj|ochran.*udaj/i.test(lower)) {
+    console.log('🔒 Rozpoznaný zámer: ochrana osobných údajov');
+    return { type: 'static_info', infoType: 'ochranOsobnychUdajov' };
   }
   
   // Všeobecná otázka (nie o produktoch)
@@ -533,6 +666,13 @@ async function buildContext(message, intent) {
         console.log('📊 Stats loaded:', context.stats?.productCount, 'products');
         break;
       
+      case 'static_info':
+        // Statické informácie - kontakt, doručenie, vrátenie atď.
+        console.log('📋 Statické info - typ:', intent.infoType);
+        context.staticInfo = STATIC_INFO;
+        context.staticInfoType = intent.infoType;
+        break;
+      
       case 'thanks':
       case 'conversation':
       case 'general_question':
@@ -627,6 +767,8 @@ async function buildContext(message, intent) {
     kategórie: context.categories.length,
     značky: context.brands.length,
     stats: !!context.stats,
+    staticInfo: !!context.staticInfo,
+    staticInfoType: context.staticInfoType || 'none',
     analysis: context.analysis ? 'áno' : 'nie',
     needsClarification: context.needsClarification
   });
@@ -644,6 +786,9 @@ function buildMessages(message, history, context, intent) {
     systemPrompt += `\n\n${context.categoriesPrompt}`;
   }
   
+  // Pridaj statické informácie do system promptu
+  systemPrompt += `\n\n${STATIC_INFO_PROMPT}`;
+  
   const messages = [
     { role: 'system', content: systemPrompt }
   ];
@@ -651,7 +796,30 @@ function buildMessages(message, history, context, intent) {
   // Pridaj kontext
   let contextMessage = '';
   
-  if (context.stats) {
+  // Ak je to dotaz na statické informácie, pridaj špecifický kontext
+  if (context.staticInfo && context.staticInfoType) {
+    const info = context.staticInfo[context.staticInfoType];
+    const infoLabels = {
+      'kontakt': 'KONTAKTNÉ ÚDAJE',
+      'socialneMedia': 'SOCIÁLNE SIETE',
+      'dorucenie': 'INFORMÁCIE O DORUČENÍ',
+      'darcekPriNakupe': 'DARČEK PRI NÁKUPE',
+      'vratenieTovaru': 'VRÁTENIE TOVARU',
+      'reklamacnyPoriadok': 'REKLAMAČNÝ PORIADOK',
+      'obchodnePodmienky': 'OBCHODNÉ PODMIENKY',
+      'ochranOsobnychUdajov': 'OCHRANA OSOBNÝCH ÚDAJOV'
+    };
+    
+    contextMessage = `ZÁKAZNÍK SA PÝTA NA: ${infoLabels[context.staticInfoType] || context.staticInfoType}
+
+RELEVANTNÉ INFORMÁCIE:
+${JSON.stringify(info, null, 2)}
+
+INŠTRUKCIE:
+- Odpovedz priateľsky a stručne na základe týchto informácií
+- Ak je k dispozícii URL odkaz, môžeš ho zákazníkovi poskytnúť
+- Ponúkni ďalšiu pomoc ak je to vhodné`;
+  } else if (context.stats) {
     contextMessage = `INFORMÁCIE O OBCHODE:
 - Počet produktov: ${context.stats.productCount}
 - Hlavné kategórie: ${context.stats.topCategories.map(c => c.name).join(', ')}
