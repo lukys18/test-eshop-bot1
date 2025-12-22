@@ -624,90 +624,138 @@ async function getAllProducts() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// HLAVNÁ VYHĽADÁVACIA FUNKCIA
+// HLAVNÁ VYHĽADÁVACIA FUNKCIA - JEDNODUCHÁ A ROBUSTNÁ
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Inteligentné vyhľadávanie produktov s pokročilým skórovaním
- * @param {string} query - Vyhľadávací dotaz
- * @param {Object} options - Možnosti vyhľadávania
- * @returns {Object} - { products, total, query, analysis, needsClarification, clarificationQuestion }
+ * NOVÉ jednoduché vyhľadávanie produktov
+ * Priorita: 1. Presná zhoda značky/názvu, 2. Čiastočná zhoda slov
  */
 export async function searchProducts(query, options = {}) {
   const { limit = 5, onlyAvailable = true } = options;
   
   console.log('═══════════════════════════════════════════════════════════');
-  console.log('🔍 INTELIGENTNÉ VYHĽADÁVANIE');
-  console.log('📝 Query:', query);
+  console.log('🔍 VYHĽADÁVANIE:', query);
   
   const products = await getAllProducts();
   
   if (products.length === 0) {
-    return { products: [], total: 0, query, analysis: null };
+    return { products: [], total: 0, query };
   }
   
-  // 1. Analyzuj požiadavku používateľa
-  const analysis = analyzeUserRequest(query);
+  const queryNorm = normalize(query);
+  const queryWords = queryNorm.split(/\s+/).filter(w => w.length >= 2 && !STOPWORDS.has(w));
   
-  console.log('🎯 Detekovaný typ produktu:', analysis.productType || 'neurčený');
-  console.log('🏷️ Produktová línia:', analysis.productLineName || 'neurčená');
-  console.log('👤 Cieľová skupina:', analysis.targetGender || 'neurčená', '/', analysis.targetAgeGroup || 'neurčená');
-  console.log('🔧 Problémy:', analysis.problems.length > 0 ? analysis.problems.join(', ') : 'žiadne');
-  console.log('🏷️ Preferovaná značka:', analysis.preferredBrand || 'žiadna');
-  console.log('💰 Hľadá zľavy:', analysis.wantsDiscount);
-  console.log('🔤 Search terms:', analysis.searchTerms.join(', '));
+  console.log('🔤 Vyhľadávacie slová:', queryWords.join(', '));
   
-  // 2. Skóruj všetky produkty
+  // Skóruj produkty jednoduchým ale efektívnym spôsobom
   const scoredProducts = [];
-  let filteredCount = 0;
   
   for (const product of products) {
-    // Preskočiť nedostupné ak je filter
-    if (onlyAvailable && !product.available) {
-      filteredCount++;
-      continue;
+    // Preskočiť nedostupné
+    if (onlyAvailable && !product.available) continue;
+    
+    const titleNorm = normalize(product.title || '');
+    const brandNorm = normalize(product.brand || '');
+    const categoryNorm = normalize(product.category || product.categoryMain || '');
+    const descNorm = normalize(product.description || '').substring(0, 200); // Len začiatok popisu
+    
+    let score = 0;
+    let matchReasons = [];
+    
+    // === 1. PRESNÁ ZHODA CELÉHO QUERY V NÁZVE (najvyššia priorita) ===
+    if (titleNorm.includes(queryNorm)) {
+      score += 100;
+      matchReasons.push('presná zhoda v názve');
     }
     
-    const result = calculateProductScore(product, analysis);
-    
-    if (result.isFiltered) {
-      filteredCount++;
-      continue;
+    // === 2. ZHODA ZNAČKY ===
+    // Skontroluj či niektoré query slovo je značka produktu
+    for (const word of queryWords) {
+      if (word.length >= 3) {
+        // Presná zhoda značky
+        if (brandNorm === word || brandNorm.includes(word)) {
+          score += 50;
+          matchReasons.push(`značka: ${word}`);
+          break;
+        }
+        // Značka v názve produktu
+        if (titleNorm.includes(word) && titleNorm.indexOf(word) < 30) {
+          // Slovo je na začiatku názvu = pravdepodobne značka
+          score += 40;
+          matchReasons.push(`značka v názve: ${word}`);
+          break;
+        }
+      }
     }
     
-    // Minimálne skóre pre relevantné produkty
-    const minScore = analysis.productType ? 20 : 10;
+    // === 3. ZHODA JEDNOTLIVÝCH SLOV ===
+    let wordMatches = 0;
+    for (const word of queryWords) {
+      if (word.length >= 3) {
+        if (titleNorm.includes(word)) {
+          score += 15;
+          wordMatches++;
+        } else if (brandNorm.includes(word)) {
+          score += 12;
+          wordMatches++;
+        } else if (categoryNorm.includes(word)) {
+          score += 8;
+          wordMatches++;
+        } else if (descNorm.includes(word)) {
+          score += 5;
+          wordMatches++;
+        }
+      }
+    }
     
-    if (result.score >= minScore) {
+    if (wordMatches > 0) {
+      matchReasons.push(`${wordMatches}/${queryWords.length} slov`);
+    }
+    
+    // === 4. BONUS ZA ZĽAVU ===
+    if (product.hasDiscount) {
+      score += 3;
+    }
+    
+    // === 5. BONUS ZA POČET MATCHNUTÝCH SLOV ===
+    // Ak matchli všetky slová, veľký bonus
+    if (queryWords.length > 1 && wordMatches === queryWords.length) {
+      score += 20;
+      matchReasons.push('všetky slová');
+    }
+    
+    // Minimálne skóre pre zaradenie
+    if (score >= 10) {
       scoredProducts.push({
         product,
-        score: result.score,
-        breakdown: result.breakdown
+        score,
+        matchReasons
       });
     }
   }
   
-  // 3. Zoraď podľa skóre (najvyššie prvé)
+  // Zoraď podľa skóre
   scoredProducts.sort((a, b) => b.score - a.score);
   
-  // 4. Vráť top výsledky
+  // Top výsledky
   const results = scoredProducts.slice(0, limit).map(s => ({
     ...s.product,
     _score: s.score,
-    _breakdown: s.breakdown
+    _matchReasons: s.matchReasons
   }));
   
   console.log('───────────────────────────────────────────────────────────');
-  console.log(`📊 VÝSLEDKY: ${scoredProducts.length} relevantných z ${products.length} (${filteredCount} odfiltrovaných)`);
+  console.log(`📊 VÝSLEDKY: ${scoredProducts.length} nájdených`);
   
   if (results.length > 0) {
     console.log('🏆 TOP VÝSLEDKY:');
     results.forEach((p, i) => {
-      console.log(`   ${i+1}. ${p.title}`);
-      console.log(`      Skóre: ${p._score} | Typ: ${p._breakdown.productType} | Línia: ${p._breakdown.productLineMatch || 0} | Značka: ${p._breakdown.brandMatch} | Termy: ${p._breakdown.termMatches}`);
+      console.log(`   ${i+1}. [${p._score}] ${p.title}`);
+      console.log(`      Dôvod: ${p._matchReasons.join(', ')}`);
     });
   } else {
-    console.log('⚠️ Žiadne relevantné výsledky!');
+    console.log('⚠️ Žiadne výsledky pre:', queryWords.join(', '));
   }
   
   console.log('═══════════════════════════════════════════════════════════');
@@ -716,10 +764,7 @@ export async function searchProducts(query, options = {}) {
     products: results,
     total: scoredProducts.length,
     query: query,
-    terms: analysis.searchTerms,
-    analysis: analysis,
-    needsClarification: analysis.needsClarification && results.length === 0,
-    clarificationQuestion: analysis.clarificationQuestion
+    terms: queryWords
   };
 }
 
