@@ -146,6 +146,42 @@ function findBrandInText(text) {
   return null;
 }
 
+// Funkcia pre nájdenie VŠETKÝCH značiek v texte
+function findAllBrandsInText(text) {
+  const normalized = normalize(text);
+  const words = normalized.split(/\s+/).filter(w => w.length >= 1);
+  const foundBrands = new Set();
+  
+  // Najprv skús dvojslovné značky
+  for (let i = 0; i < words.length - 1; i++) {
+    const twoWords = words[i] + ' ' + words[i + 1];
+    if (ALL_BRANDS.has(twoWords)) {
+      foundBrands.add(twoWords);
+    }
+  }
+  
+  // Potom jednoslovné - ale pre krátke značky iba presná zhoda celého slova
+  for (const word of words) {
+    // Krátke značky (1-3 znaky) - musí byť presná zhoda
+    if (word.length <= 3 && SHORT_BRANDS.has(word)) {
+      foundBrands.add(word);
+    }
+    // Dlhšie značky (4+ znakov)
+    if (word.length >= 4 && ALL_BRANDS.has(word)) {
+      foundBrands.add(word);
+    }
+  }
+  
+  // Skús aj bez medzier (oldspice, headshoulders) - ale len pre dlhšie značky
+  for (const brand of ALL_BRANDS) {
+    if (brand.length >= 5 && normalized.includes(brand)) {
+      foundBrands.add(brand);
+    }
+  }
+  
+  return Array.from(foundBrands);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ANALÝZA CIEĽOVEJ SKUPINY - Extrakcia z produktových dát
 // ═══════════════════════════════════════════════════════════════════════════
@@ -749,11 +785,12 @@ export async function searchProducts(query, options = {}) {
   const queryNorm = normalize(query);
   const queryWords = queryNorm.split(/\s+/).filter(w => w.length >= 2 && !STOPWORDS.has(w));
   
-  // Detekuj značku v dotaze
-  const detectedBrand = findBrandInText(query);
+  // Detekuj VŠETKY značky v dotaze
+  const detectedBrands = findAllBrandsInText(query);
+  const detectedBrand = detectedBrands.length > 0 ? detectedBrands[0] : null; // pre spätnú kompatibilitu
   
   console.log('🔤 Vyhľadávacie slová:', queryWords.join(', '));
-  console.log('🏷️ Detekovaná značka:', detectedBrand || 'žiadna');
+  console.log('🏷️ Detekované značky:', detectedBrands.length > 0 ? detectedBrands.join(', ') : 'žiadna');
   
   // Skóruj produkty
   const scoredProducts = [];
@@ -772,16 +809,22 @@ export async function searchProducts(query, options = {}) {
     let matchReasons = [];
     
     // === 1. ZHODA ZNAČKY (NAJVYŠŠIA PRIORITA) ===
-    if (detectedBrand) {
+    // Kontrola všetkých detekovaných značiek
+    let brandMatchFound = false;
+    for (const brand of detectedBrands) {
       // Presná zhoda značky produktu
-      if (brandNorm.includes(detectedBrand) || detectedBrand.includes(brandNorm)) {
+      if (brandNorm.includes(brand) || brand.includes(brandNorm)) {
         score += 60;
-        matchReasons.push(`značka: ${detectedBrand}`);
+        matchReasons.push(`značka: ${brand}`);
+        brandMatchFound = true;
+        break; // Stačí jedna zhoda značky
       }
       // Značka v názve produktu
-      else if (titleNorm.includes(detectedBrand)) {
+      else if (titleNorm.includes(brand)) {
         score += 55;
-        matchReasons.push(`značka v názve: ${detectedBrand}`);
+        matchReasons.push(`značka v názve: ${brand}`);
+        brandMatchFound = true;
+        break;
       }
     }
     
@@ -834,12 +877,51 @@ export async function searchProducts(query, options = {}) {
   // Zoraď podľa skóre
   scoredProducts.sort((a, b) => b.score - a.score);
   
-  // Top výsledky
-  const results = scoredProducts.slice(0, limit).map(s => ({
-    ...s.product,
-    _score: s.score,
-    _matchReasons: s.matchReasons
-  }));
+  // Pri viacerých značkách - zabezpeč zastúpenie každej značky
+  let results = [];
+  if (detectedBrands.length > 1) {
+    // Rozdeľ limit medzi značky
+    const perBrandLimit = Math.max(2, Math.ceil(limit / detectedBrands.length));
+    const usedProductIds = new Set();
+    
+    // Pre každú značku vyber top produkty
+    for (const brand of detectedBrands) {
+      const brandProducts = scoredProducts
+        .filter(s => {
+          const brandNorm = normalize(s.product.brand || '');
+          const titleNorm = normalize(s.product.title || '');
+          return (brandNorm.includes(brand) || brand.includes(brandNorm) || titleNorm.includes(brand)) 
+                 && !usedProductIds.has(s.product.id);
+        })
+        .slice(0, perBrandLimit);
+      
+      for (const sp of brandProducts) {
+        usedProductIds.add(sp.product.id);
+        results.push({
+          ...sp.product,
+          _score: sp.score,
+          _matchReasons: sp.matchReasons,
+          _matchedBrand: brand
+        });
+      }
+    }
+    
+    // Zoraď výsledky podľa skóre
+    results.sort((a, b) => b._score - a._score);
+    
+    // Orez na limit
+    results = results.slice(0, limit);
+    
+    console.log(`🏷️ Multi-brand search: ${detectedBrands.join(', ')}`);
+    console.log(`   Per-brand limit: ${perBrandLimit}, Total results: ${results.length}`);
+  } else {
+    // Štandardný výber - top výsledky
+    results = scoredProducts.slice(0, limit).map(s => ({
+      ...s.product,
+      _score: s.score,
+      _matchReasons: s.matchReasons
+    }));
+  }
   
   console.log('───────────────────────────────────────────────────────────');
   console.log(`📊 VÝSLEDKY: ${scoredProducts.length} nájdených`);
@@ -847,7 +929,7 @@ export async function searchProducts(query, options = {}) {
   if (results.length > 0) {
     console.log('🏆 TOP VÝSLEDKY:');
     results.forEach((p, i) => {
-      console.log(`   ${i+1}. [${p._score}] ${p.title}`);
+      console.log(`   ${i+1}. [${p._score}] ${p.title}${p._matchedBrand ? ` (${p._matchedBrand})` : ''}`);
       console.log(`      Dôvod: ${p._matchReasons?.join(', ') || 'N/A'}`);
     });
   } else {
@@ -861,7 +943,8 @@ export async function searchProducts(query, options = {}) {
     total: scoredProducts.length,
     query: query,
     terms: queryWords,
-    detectedBrand: detectedBrand
+    detectedBrand: detectedBrand,
+    detectedBrands: detectedBrands
   };
 }
 
