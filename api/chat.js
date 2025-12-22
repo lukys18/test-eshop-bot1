@@ -24,6 +24,8 @@ const STATIC_INFO = {
   },
   dorucenie: {
     cas: 'Produkt bude doručený do 48 hodín.',
+    postovne: 'Poštovné od 3,99€',
+    dopravaZdarma: 'Doprava zdarma nad 100€ (do 20kg)',
     info: 'Rýchle a spoľahlivé doručenie priamo k vám domov.'
   },
   darcekPriNakupe: {
@@ -64,6 +66,8 @@ INFORMÁCIE O OBCHODE (použite pri relevantných otázkach):
 
 🚚 DORUČENIE:
 - ${STATIC_INFO.dorucenie.cas}
+- ${STATIC_INFO.dorucenie.postovne}
+- ${STATIC_INFO.dorucenie.dopravaZdarma}
 
 🎁 DARČEK PRI NÁKUPE:
 - ${STATIC_INFO.darcekPriNakupe.info}
