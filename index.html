@@ -379,20 +379,105 @@ async function sendMessage() {
 function categorizeMessage(message) {
   const lowerMsg = message.toLowerCase();
   
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PRODUKTOVÉ KATEGÓRIE (konkrétne pre drogériu)
+  // ═══════════════════════════════════════════════════════════════════════════
+  
+  // Kozmetika & Starostlivosť o telo
+  if (lowerMsg.includes('kozmetik') || lowerMsg.includes('make-up') || lowerMsg.includes('makeup') ||
+      lowerMsg.includes('rúž') || lowerMsg.includes('maskara') || lowerMsg.includes('púder') ||
+      lowerMsg.includes('krém') || lowerMsg.includes('pleť') || lowerMsg.includes('tvár') ||
+      lowerMsg.includes('očn') || lowerMsg.includes('líčen') || lowerMsg.includes('líčidl')) {
+    return 'kozmetika';
+  }
+  
+  // Vlasová starostlivosť
+  if (lowerMsg.includes('vlasy') || lowerMsg.includes('vlas') || lowerMsg.includes('šampón') ||
+      lowerMsg.includes('kondicionér') || lowerMsg.includes('farba na vlasy') || lowerMsg.includes('lak na vlasy') ||
+      lowerMsg.includes('gel na vlasy') || lowerMsg.includes('farbenie')) {
+    return 'vlasová starostlivosť';
+  }
+  
+  // Hygiena & Starostlivosť o telo
+  if (lowerMsg.includes('mydlo') || lowerMsg.includes('sprchov') || lowerMsg.includes('kúpeľ') ||
+      lowerMsg.includes('deodorant') || lowerMsg.includes('antiperspirant') || lowerMsg.includes('zubná') ||
+      lowerMsg.includes('zubné') || lowerMsg.includes('pasta') || lowerMsg.includes('ústna') ||
+      lowerMsg.includes('hygien') || lowerMsg.includes('telové') || lowerMsg.includes('telo')) {
+    return 'hygiena';
+  }
+  
+  // Pranie & Starostlivosť o textil
+  if (lowerMsg.includes('prací') || lowerMsg.includes('pranie') || lowerMsg.includes('prať') ||
+      lowerMsg.includes('aviváž') || lowerMsg.includes('bieliz') || lowerMsg.includes('škrob') ||
+      lowerMsg.includes('odstraňovač škvŕn') || lowerMsg.includes('bielidlo') || lowerMsg.includes('pracie')) {
+    return 'pranie';
+  }
+  
+  // Upratovanie & Čistiace prostriedky
+  if (lowerMsg.includes('upratov') || lowerMsg.includes('čist') || lowerMsg.includes('umýv') ||
+      lowerMsg.includes('podlah') || lowerMsg.includes('wc') || lowerMsg.includes('toalet') ||
+      lowerMsg.includes('kúpeľň') || lowerMsg.includes('kuchyn') || lowerMsg.includes('okn') ||
+      lowerMsg.includes('dezinfek') || lowerMsg.includes('odmasťov') || lowerMsg.includes('domest')) {
+    return 'upratovanie';
+  }
+  
+  // Riad & Umývanie riadu
+  if (lowerMsg.includes('riad') || lowerMsg.includes('umývač') || lowerMsg.includes('tablety do') ||
+      lowerMsg.includes('jar') || lowerMsg.includes('prostriedok na riad')) {
+    return 'riad';
+  }
+  
+  // Parfumy & Vône
+  if (lowerMsg.includes('parfum') || lowerMsg.includes('parfém') || lowerMsg.includes('vôňa') ||
+      lowerMsg.includes('voňavk') || lowerMsg.includes('toaletn') || lowerMsg.includes('eau de')) {
+    return 'parfumy';
+  }
+  
+  // Detská starostlivosť
+  if (lowerMsg.includes('detsk') || lowerMsg.includes('bábätk') || lowerMsg.includes('dieťa') ||
+      lowerMsg.includes('plienk') || lowerMsg.includes('kojen') || lowerMsg.includes('baby')) {
+    return 'detské';
+  }
+  
+  // Zdravie & Liečivá
+  if (lowerMsg.includes('vitamín') || lowerMsg.includes('liek') || lowerMsg.includes('bolesť') ||
+      lowerMsg.includes('chorob') || lowerMsg.includes('prechladnut') || lowerMsg.includes('náplasť') ||
+      lowerMsg.includes('obväz') || lowerMsg.includes('zdravot')) {
+    return 'zdravie';
+  }
+  
+  // Papierové výrobky
+  if (lowerMsg.includes('toaletn') || lowerMsg.includes('papier') || lowerMsg.includes('vreckovk') ||
+      lowerMsg.includes('utierky') || lowerMsg.includes('servítk')) {
+    return 'papierové výrobky';
+  }
+  
+  // Domácnosť & Potreby
+  if (lowerMsg.includes('domácnosť') || lowerMsg.includes('sviečk') || lowerMsg.includes('osviežovač') ||
+      lowerMsg.includes('vreck') || lowerMsg.includes('fóli') || lowerMsg.includes('alobalo')) {
+    return 'domácnosť';
+  }
+  
+  // Starostlivosť o mužov
+  if (lowerMsg.includes('holen') || lowerMsg.includes('žiletk') || lowerMsg.includes('after') ||
+      lowerMsg.includes('pena na holen') || lowerMsg.includes('muž')) {
+    return 'pre mužov';
+  }
+  
+  // ═══════════════════════════════════════════════════════════════════════════
+  // VŠEOBECNÉ KATEGÓRIE (intent)
+  // ═══════════════════════════════════════════════════════════════════════════
+  
   if (lowerMsg.includes('cena') || lowerMsg.includes('koľko') || lowerMsg.includes('stojí') || 
       lowerMsg.includes('cenník') || lowerMsg.includes('€') || lowerMsg.includes('eur')) {
-    return 'ceny';
+    return 'otázka-cena';
   }
   if (lowerMsg.includes('kontakt') || lowerMsg.includes('email') || lowerMsg.includes('telefón') || 
       lowerMsg.includes('podpora') || lowerMsg.includes('pomoc')) {
     return 'kontakt';
   }
-  if (lowerMsg.includes('produkt') || lowerMsg.includes('tovar') || lowerMsg.includes('hľadám') || 
-      lowerMsg.includes('máte') || lowerMsg.includes('ponúkate') || lowerMsg.includes('odporúč')) {
-    return 'produkty';
-  }
   if (lowerMsg.includes('skladom') || lowerMsg.includes('dostupn') || lowerMsg.includes('k dispozícii')) {
-    return 'dostupnosť';
+    return 'otázka-dostupnosť';
   }
   if (lowerMsg.includes('doprav') || lowerMsg.includes('doručen') || lowerMsg.includes('poštovn')) {
     return 'doprava';
@@ -403,6 +488,10 @@ function categorizeMessage(message) {
   if (lowerMsg.includes('zľav') || lowerMsg.includes('akci') || lowerMsg.includes('promo') || 
       lowerMsg.includes('kupón')) {
     return 'zľavy';
+  }
+  if (lowerMsg.includes('hľadám') || lowerMsg.includes('potrebujem') || lowerMsg.includes('chcem') ||
+      lowerMsg.includes('máte') || lowerMsg.includes('ponúkate') || lowerMsg.includes('odporúč')) {
+    return 'hľadanie-produktu';
   }
   
   return 'všeobecné';
