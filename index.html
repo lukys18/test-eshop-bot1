@@ -70,7 +70,6 @@
     let emailSubmittedInSession = false; // Track if email was submitted in this session
     let sessionActive = false; // Czy session je aktívna (chatbot otvorený a užívateľ písal)
     let sessionStartTime = null; // Časovač pre dĺžku session
-    let cachedUserId = null; // Cached user_id z IP
 
     // Generate NEW session ID
     function generateNewSessionId() {
@@ -94,35 +93,6 @@
       return sessionId;
     }
 
-    // Získaj user_id z IP (cached)
-    async function getUserId() {
-      if (cachedUserId) return cachedUserId;
-      
-      try {
-        const response = await fetch('https://api.ipify.org?format=json');
-        if (response.ok) {
-          const data = await response.json();
-          // Vytvor jednoduchý hash z IP na klientovi (pre lepší tracking)
-          // Server aj tak vytvorí svoj hash, ale toto pomáha s konzistenciou
-          cachedUserId = await hashString(data.ip + '-ragnetiq');
-          console.log('📊 [Analytics] User ID cached');
-        }
-      } catch (e) {
-        console.warn('📊 [Analytics] Could not get user ID');
-      }
-      
-      return cachedUserId;
-    }
-
-    // Jednoduchý hash helper
-    async function hashString(str) {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(str);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32);
-    }
-
     // Mark that email was submitted in this session
     function markEmailSubmittedForSession() {
       emailSubmittedInSession = true;
@@ -134,8 +104,7 @@
       // Initialize session ID (but don't start session yet)
       getSessionId();
       
-      // Pre-fetch user ID and geo city for faster first message
-      getUserId();
+      // Pre-fetch geo city for faster first message
       getGeoCity();
       
       // Zobrazenie úvodnej správy
@@ -479,9 +448,9 @@ async function startSession() {
   const currentSessionId = getSessionId();
   const website = window.location.hostname;
   const geoCity = await getGeoCity();
-  const userId = await getUserId();
   
   try {
+    // user_id sa vytvorí automaticky na serveri z IP adresy
     const response = await fetch(ANALYTICS_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -489,8 +458,7 @@ async function startSession() {
         action: 'session_start',
         sessionId: currentSessionId,
         website: website,
-        geoCity: geoCity,
-        userId: userId
+        geoCity: geoCity
       })
     });
     

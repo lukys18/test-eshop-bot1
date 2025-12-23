@@ -77,15 +77,17 @@ export default async function handler(req, res) {
       // ═══════════════════════════════════════════════════════════════════
       
       case 'session_start': {
-        const { sessionId, website, geoCity, userId } = req.body;
+        const { sessionId, website, geoCity } = req.body;
         
         if (!sessionId || !website) {
           return res.status(400).json({ error: 'sessionId and website required' });
         }
 
-        // Získaj user_id z IP ak nie je poskytnuté
+        // Vždy vytvor user_id z IP adresy (deterministický hash)
         const ip = getIpFromRequest(req);
-        const finalUserId = userId || getUserIdFromIp(ip);
+        const finalUserId = getUserIdFromIp(ip);
+        
+        console.log('📊 [Analytics] IP:', ip, '-> User ID:', finalUserId);
 
         // Vytvor novú session
         const { data, error } = await supabase
@@ -173,15 +175,15 @@ export default async function handler(req, res) {
       // ═══════════════════════════════════════════════════════════════════
 
       case 'product_recommendation': {
-        const { sessionId, website, messageIndex, queryText, category, products, userId } = req.body;
+        const { sessionId, website, messageIndex, queryText, category, products } = req.body;
         
         if (!sessionId || !website || !products || products.length === 0) {
           return res.status(400).json({ error: 'sessionId, website, and products required' });
         }
 
-        // Získaj user_id z IP ak nie je poskytnuté
+        // Vždy vytvor user_id z IP adresy (deterministický hash)
         const ip = getIpFromRequest(req);
-        const finalUserId = userId || getUserIdFromIp(ip);
+        const finalUserId = getUserIdFromIp(ip);
 
         // 1. Vytvor záznam odporúčania
         const { data: recData, error: recError } = await supabase
@@ -237,15 +239,15 @@ export default async function handler(req, res) {
       // ═══════════════════════════════════════════════════════════════════
 
       case 'product_click': {
-        const { sessionId, website, productId, productUrl, position, userId } = req.body;
+        const { sessionId, website, productId, productUrl, position } = req.body;
         
         if (!sessionId || !productId) {
           return res.status(400).json({ error: 'sessionId and productId required' });
         }
 
-        // Získaj user_id z IP ak nie je poskytnuté
+        // Vždy vytvor user_id z IP adresy (deterministický hash)
         const ip = getIpFromRequest(req);
-        const finalUserId = userId || getUserIdFromIp(ip);
+        const finalUserId = getUserIdFromIp(ip);
 
         // 1. Zaznamenaj klik
         const { error: clickError } = await supabase
