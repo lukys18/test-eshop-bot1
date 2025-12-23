@@ -11,6 +11,33 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
+
+/**
+ * Vytvorí user_id hash z IP adresy
+ * @param {string} ip - IP adresa
+ * @returns {string} - Hash ID pre používateľa
+ */
+function getUserIdFromIp(ip) {
+  if (!ip) return null;
+  // Vytvoríme SHA-256 hash z IP + salt pre anonymitu
+  const salt = 'ragnetiq-chatbot-2024';
+  return crypto.createHash('sha256').update(ip + salt).digest('hex').substring(0, 32);
+}
+
+/**
+ * Získa IP adresu z requestu
+ * @param {Request} req - HTTP request
+ * @returns {string|null} - IP adresa
+ */
+function getIpFromRequest(req) {
+  // Vercel/Cloudflare headers
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.headers['x-real-ip'] || req.socket?.remoteAddress || null;
+}
 
 // Inicializácia Supabase klienta
 function getSupabase() {
@@ -50,24 +77,30 @@ export default async function handler(req, res) {
       // ═══════════════════════════════════════════════════════════════════
       
       case 'session_start': {
-        const { sessionId, website, geoCity } = req.body;
+        const { sessionId, website, geoCity, userId } = req.body;
         
         if (!sessionId || !website) {
           return res.status(400).json({ error: 'sessionId and website required' });
         }
+
+        // Získaj user_id z IP ak nie je poskytnuté
+        const ip = getIpFromRequest(req);
+        const finalUserId = userId || getUserIdFromIp(ip);
 
         // Vytvor novú session
         const { data, error } = await supabase
           .from('chat_sessions')
           .insert([{
             id: sessionId,
+            user_id: finalUserId,
             website: website,
             started_at: new Date().toISOString(),
             total_messages: 0,
             had_product_recommendation: false,
             had_product_click: false,
             email_submitted: false,
-            geo_city: geoCity || null
+            geo_city: geoCity || null,
+            duration_seconds: 0
           }])
           .select();
 
@@ -109,20 +142,29 @@ export default async function handler(req, res) {
       }
 
       case 'session_end': {
-        const { sessionId } = req.body;
+        const { sessionId, durationSeconds } = req.body;
         
         if (!sessionId) {
           return res.status(400).json({ error: 'sessionId required' });
         }
 
+        const updateData = {
+          ended_at: new Date().toISOString()
+        };
+        
+        // Ak máme duration z klienta, použijeme ju
+        if (durationSeconds !== undefined && durationSeconds !== null) {
+          updateData.duration_seconds = Math.round(durationSeconds);
+        }
+
         const { error } = await supabase
           .from('chat_sessions')
-          .update({ ended_at: new Date().toISOString() })
+          .update(updateData)
           .eq('id', sessionId);
 
         if (error) throw error;
 
-        console.log('📊 [Analytics] Session ended:', sessionId);
+        console.log('📊 [Analytics] Session ended:', sessionId, 'duration:', durationSeconds, 's');
         return res.status(200).json({ success: true });
       }
 
@@ -131,17 +173,22 @@ export default async function handler(req, res) {
       // ═══════════════════════════════════════════════════════════════════
 
       case 'product_recommendation': {
-        const { sessionId, website, messageIndex, queryText, category, products } = req.body;
+        const { sessionId, website, messageIndex, queryText, category, products, userId } = req.body;
         
         if (!sessionId || !website || !products || products.length === 0) {
           return res.status(400).json({ error: 'sessionId, website, and products required' });
         }
+
+        // Získaj user_id z IP ak nie je poskytnuté
+        const ip = getIpFromRequest(req);
+        const finalUserId = userId || getUserIdFromIp(ip);
 
         // 1. Vytvor záznam odporúčania
         const { data: recData, error: recError } = await supabase
           .from('chat_product_recommendations')
           .insert([{
             session_id: sessionId,
+            user_id: finalUserId,
             chat_log_id: messageIndex || 0,
             website: website,
             query_text: queryText || null,
@@ -190,17 +237,22 @@ export default async function handler(req, res) {
       // ═══════════════════════════════════════════════════════════════════
 
       case 'product_click': {
-        const { sessionId, website, productId, productUrl, position } = req.body;
+        const { sessionId, website, productId, productUrl, position, userId } = req.body;
         
         if (!sessionId || !productId) {
           return res.status(400).json({ error: 'sessionId and productId required' });
         }
+
+        // Získaj user_id z IP ak nie je poskytnuté
+        const ip = getIpFromRequest(req);
+        const finalUserId = userId || getUserIdFromIp(ip);
 
         // 1. Zaznamenaj klik
         const { error: clickError } = await supabase
           .from('chat_product_clicks')
           .insert([{
             session_id: sessionId,
+            user_id: finalUserId,
             product_id: String(productId),
             position: position || null,
             website: website || null
