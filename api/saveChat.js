@@ -120,7 +120,7 @@ export default async function handler(req, res) {
       }
 
       case 'session_update': {
-        const { sessionId, totalMessages, hadProductRecommendation, hadProductClick, emailSubmitted } = req.body;
+        const { sessionId, totalMessages, hadProductRecommendation, hadProductClick, emailSubmitted, userMessage, botResponse } = req.body;
         
         if (!sessionId) {
           return res.status(400).json({ error: 'sessionId required' });
@@ -132,6 +132,36 @@ export default async function handler(req, res) {
         if (hadProductClick !== undefined) updateData.had_product_click = hadProductClick;
         if (emailSubmitted !== undefined) updateData.email_submitted = emailSubmitted;
 
+        // Ak máme správy, pridáme ich do konverzácie
+        if (userMessage || botResponse) {
+          // Najprv získame existujúcu konverzáciu
+          const { data: existingSession } = await supabase
+            .from('chat_sessions')
+            .select('conversation')
+            .eq('id', sessionId)
+            .single();
+
+          let conversation = existingSession?.conversation || [];
+          
+          // Pridaj nové správy
+          if (userMessage) {
+            conversation.push({
+              role: 'user',
+              content: userMessage,
+              timestamp: new Date().toISOString()
+            });
+          }
+          if (botResponse) {
+            conversation.push({
+              role: 'assistant', 
+              content: botResponse,
+              timestamp: new Date().toISOString()
+            });
+          }
+          
+          updateData.conversation = conversation;
+        }
+
         const { error } = await supabase
           .from('chat_sessions')
           .update(updateData)
@@ -139,7 +169,7 @@ export default async function handler(req, res) {
 
         if (error) throw error;
 
-        console.log('📊 [Analytics] Session updated:', sessionId, updateData);
+        console.log('📊 [Analytics] Session updated:', sessionId, 'messages:', totalMessages);
         return res.status(200).json({ success: true });
       }
 

@@ -361,8 +361,8 @@ async function sendMessage() {
     // Pridaj odpoveď asistenta do histórie
     chatHistory.push({ role: "assistant", content: reply });
 
-    // 📊 ANALYTICS: Aktualizuj session
-    updateSessionAnalytics(currentMessageIndex, products.length > 0);
+    // 📊 ANALYTICS: Aktualizuj session s konverzáciou
+    updateSessionAnalytics(currentMessageIndex, products.length > 0, message, reply);
 
   } catch (error) {
     console.error("❌ Chyba pri spracovaní:", error);
@@ -471,9 +471,9 @@ async function startSession() {
 }
 
 /**
- * Aktualizuje session analytiky
+ * Aktualizuje session analytiky s konverzáciou
  */
-async function updateSessionAnalytics(totalMessages, hadProductRecommendation) {
+async function updateSessionAnalytics(totalMessages, hadProductRecommendation, userMessage, botResponse) {
   const currentSessionId = getSessionId();
   
   try {
@@ -484,10 +484,12 @@ async function updateSessionAnalytics(totalMessages, hadProductRecommendation) {
         action: 'session_update',
         sessionId: currentSessionId,
         totalMessages: totalMessages,
-        hadProductRecommendation: hadProductRecommendation
+        hadProductRecommendation: hadProductRecommendation,
+        userMessage: userMessage,
+        botResponse: botResponse
       })
     });
-    console.log('📊 [Analytics] Session updated - messages:', totalMessages, 'products:', hadProductRecommendation);
+    console.log('📊 [Analytics] Session updated - messages:', totalMessages);
   } catch (e) {
     console.warn('📊 [Analytics] Failed to update session');
   }
